@@ -183,7 +183,7 @@ elif sezione == "📈 Production Forecast":
         r2_iper   = 1 - np.sum((q-q_i)**2)/np.sum((q-q.mean())**2)
     except Exception: p_iper = None
 
-    def ci_arps(func, params, pcov, t_arr, n_samples=300):
+    def ci_arps(params, pcov, t, model_fn, n_samples=300):
         """CI al 95% via MC sampling della distribuzione dei parametri."""
         try:
             if pcov is None or not np.all(np.isfinite(pcov)):
@@ -193,7 +193,7 @@ elif sezione == "📈 Production Forecast":
             curves = []
             for s in samples:
                 try:
-                    y = func(t_arr, *s)
+                    y = model_fn(t, *s)
                     if np.all(np.isfinite(y)) and np.all(y >= 0):
                         curves.append(y)
                 except Exception:
@@ -239,25 +239,25 @@ elif sezione == "📈 Production Forecast":
     fig.add_trace(go.Scatter(x=df_p['DATEPRD'], y=df_p['BORE_OIL_VOL'],
         mode='markers', marker=dict(size=3, color='#95a5a6', opacity=0.5), name='Dati reali'))
     if p_esp is not None:
-        lo_e, hi_e = ci_arps(arps_esponenziale, p_esp, pcov_esp, t_fut)
+        lo_e, hi_e = ci_arps(p_esp, pcov_esp, t_fut, arps_esponenziale)
         if lo_e is not None:
             fig.add_trace(go.Scatter(
                 x=list(date_fut) + list(date_fut[::-1]),
                 y=list(hi_e) + list(lo_e[::-1]),
                 fill='toself', fillcolor='rgba(52,152,219,0.2)',
-                line=dict(color='rgba(255,255,255,0)'),
+                line=dict(color='rgba(0,0,0,0)'),
                 showlegend=True, name='CI 95% Exp', hoverinfo='skip'))
         fig.add_trace(go.Scatter(x=date_fut, y=arps_esponenziale(t_fut,*p_esp),
             mode='lines', line=dict(color='#3498db',width=2,dash='dash'),
             name=f'Arps Exp (MAPE {mape_esp:.1f}%)'))
     if p_iper is not None:
-        lo_i, hi_i = ci_arps(arps_iperbolica, p_iper, pcov_iper, t_fut)
+        lo_i, hi_i = ci_arps(p_iper, pcov_iper, t_fut, arps_iperbolica)
         if lo_i is not None:
             fig.add_trace(go.Scatter(
                 x=list(date_fut) + list(date_fut[::-1]),
                 y=list(hi_i) + list(lo_i[::-1]),
                 fill='toself', fillcolor='rgba(230,126,34,0.2)',
-                line=dict(color='rgba(255,255,255,0)'),
+                line=dict(color='rgba(0,0,0,0)'),
                 showlegend=True, name='CI 95% Iper', hoverinfo='skip'))
         fig.add_trace(go.Scatter(x=date_fut, y=arps_iperbolica(t_fut,*p_iper),
             mode='lines', line=dict(color='#e67e22',width=2,dash='dot'),
@@ -451,8 +451,9 @@ elif sezione == "⚙️ Well Optimizer":
     baseline_sim   = baseline['olio']
     if abs(baseline_sim - baseline_reale) / max(baseline_reale, 1e-6) > 0.20:
         st.warning(
-            f"⚠️ Baseline simulatore ({baseline_sim:.1f} Sm³/g) differisce dai dati reali "
-            f"({baseline_reale:.1f} Sm³/g) di più del 20%. I risultati potrebbero essere imprecisi."
+            f"⚠️ Baseline simulatore ({baseline_sim:.1f} Sm³/g) vs dati reali ({baseline_reale:.1f} Sm³/g): "
+            f"differenza > 20%. Il simulatore è calibrato su un sottoinsieme dei dati "
+            f"(giorni con choke disponibile) — i valori potrebbero essere sovrastimati."
         )
 
     def simula(choke_pct, bl):
