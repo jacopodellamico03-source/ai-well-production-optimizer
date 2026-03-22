@@ -1,5 +1,7 @@
 # 🛢️ AI-Powered Well Production Optimizer
 
+[![Tests](https://github.com/jacopodellamico03-source/ai-well-production-optimizer/actions/workflows/tests.yml/badge.svg)](https://github.com/jacopodellamico03-source/ai-well-production-optimizer/actions/workflows/tests.yml)
+
 > Machine learning pipeline for production forecasting, anomaly detection, and choke optimization on Equinor's Volve open dataset.
 
 **[🚀 Live Demo](https://ai-well-appuction-optimizer-5njgmn2az67lsxtfxe7g8y.streamlit.app)**
