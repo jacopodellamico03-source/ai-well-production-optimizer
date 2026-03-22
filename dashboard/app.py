@@ -407,6 +407,33 @@ elif sezione == "📈 Production Forecast":
         st.markdown("#### 📋 Performance modelli")
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
+        if xgb_ok:
+            with st.expander("📊 Feature Importance XGBoost"):
+                feats_xgb_names = ['DAYS','BORE_GAS_VOL','BORE_WAT_VOL','AVG_DOWNHOLE_PRESSURE',
+                                    'AVG_CHOKE_SIZE_P','ON_STREAM_HRS','GOR','WATERCUT',
+                                    'OIL_ROLL7','OIL_ROLL30','OIL_CUMSUM','OIL_LAG1','OIL_LAG7']
+                importances = xgb_model.feature_importances_
+                fi_pairs = sorted(zip(feats_xgb_names, importances), key=lambda x: x[1])
+                fi_labels = [p[0] for p in fi_pairs]
+                fi_values = [p[1] for p in fi_pairs]
+                n = len(fi_pairs)
+                fi_colors = [
+                    f"rgba({int(0 + (88-0)*(i/(n-1)))}, {int(100 + (150-100)*(i/(n-1)))}, {int(0 + (44-0)*(i/(n-1)))}, 1)"
+                    for i in range(n)
+                ]
+                fig_fi = go.Figure(go.Bar(
+                    x=fi_values, y=fi_labels,
+                    orientation='h',
+                    marker_color=fi_colors,
+                ))
+                fig_fi.update_layout(
+                    title=f"Feature Importance — XGBoost ({POZZI_LABEL[pozzo]})",
+                    xaxis_title="Importanza relativa",
+                    height=450,
+                    margin=dict(l=10, r=10, t=40, b=10),
+                )
+                st.plotly_chart(fig_fi, use_container_width=True)
+
     # ── EUR — Estimated Ultimate Recovery ────────────────────────────────────
     def calcola_eur(modello, params, q_lim=50, dt=1):
         t, q, eur = 0, modello(0, *params), 0
