@@ -27,10 +27,21 @@ BBL_PER_SM3 = 6.29
 # ── CARICAMENTO DATI ──────────────────────────────────────────────────────────
 @st.cache_data
 def carica_dati():
+    """Carica il dataset di produzione Volve dal file Excel.
+
+    Returns:
+        pd.DataFrame: Dati grezzi di produzione con tutte le colonne originali.
+    """
     return pd.read_excel(os.path.join(BASE_DIR, 'data', 'Volve production data.xlsx'))
 
 @st.cache_data
 def carica_brent():
+    """Carica i prezzi storici del Brent grezzo dal dataset EIA (CSV).
+
+    Returns:
+        pd.DataFrame | None: DataFrame con indice DATE e colonna BRENT (USD/bbl),
+            oppure None se il file non è disponibile o contiene errori.
+    """
     try:
         path = os.path.join(BASE_DIR, 'data', 'brent_prices.csv')
         df_b = pd.read_csv(path, parse_dates=['observation_date'])
@@ -43,6 +54,13 @@ def carica_brent():
 
 @st.cache_resource
 def carica_modelli_xgb():
+    """Carica i modelli XGBoost e i relativi scaler per tutti e tre i pozzi.
+
+    Returns:
+        dict[str, tuple]: Dizionario che mappa il nome del pozzo a una coppia
+            (XGBRegressor, MinMaxScaler). Se un modello non è trovato su disco,
+            la coppia corrispondente è (None, None).
+    """
     modelli = {}
     mapping = {
         'NO 15/9-F-14 H': ('xgboost_F14H.pkl', 'scaler_F14H.pkl'),
@@ -61,7 +79,20 @@ def carica_modelli_xgb():
     return modelli
 
 def get_prezzo_medio_brent(df_prod, df_brent, fallback=80.0):
-    """Prezzo Brent medio nel periodo operativo del pozzo. Ritorna (prezzo, bool)."""
+    """Calcola il prezzo medio del Brent nel periodo operativo di un pozzo.
+
+    Args:
+        df_prod (pd.DataFrame): Dati di produzione del pozzo con colonna DATEPRD.
+        df_brent (pd.DataFrame | None): Prezzi Brent con indice di tipo DatetimeIndex
+            e colonna BRENT. Può essere None se il dataset non è disponibile.
+        fallback (float): Prezzo in USD/bbl da usare se i dati Brent non coprono
+            il periodo del pozzo. Default: 80.0.
+
+    Returns:
+        tuple[float, bool]: Coppia (prezzo, trovato) dove prezzo è il Brent medio
+            in USD/bbl e trovato indica se il prezzo proviene da dati reali (True)
+            o dal valore di fallback (False).
+    """
     if df_brent is None or len(df_prod) == 0:
         return fallback, False
     try:
@@ -156,6 +187,17 @@ if sezione == "🏠 Home":
     # ── Confronto multi-pozzo ─────────────────────────────────────────────────
     @st.cache_data
     def calcola_stats_multipozzo(_df, _df_brent):
+        """Calcola statistiche di produzione e ricavo per tutti i pozzi.
+
+        Args:
+            _df (pd.DataFrame): Dataset completo di produzione Volve.
+            _df_brent (pd.DataFrame | None): Prezzi Brent storici EIA.
+
+        Returns:
+            pd.DataFrame: Tabella con una riga per pozzo e colonne:
+                Pozzo, Giorni produzione, Prod. cumulativa (M Sm³),
+                Portata media/massima/finale (Sm³/g), Ricavo stimato (M USD).
+        """
         rows = []
         for pozzo in POZZI:
             dp = _df[_df['WELL_BORE_CODE'] == pozzo].copy()
@@ -244,7 +286,24 @@ elif sezione == "📈 Production Forecast":
     except Exception: p_iper = None
 
     def ci_arps(params, pcov, t, model_fn, n_samples=300):
-        """CI al 95% via MC sampling della distribuzione dei parametri."""
+        """Calcola l'intervallo di confidenza al 95% per una curva Arps via Monte Carlo.
+
+        Campiona n_samples vettori di parametri dalla distribuzione normale multivariata
+        N(params, pcov) e calcola i percentili 2.5 e 97.5 della distribuzione delle curve.
+
+        Args:
+            params (array-like): Parametri ottimali restituiti da curve_fit.
+            pcov (np.ndarray): Matrice di covarianza dei parametri restituita da curve_fit.
+            t (np.ndarray): Array di tempi (giorni) su cui valutare la curva.
+            model_fn (callable): Funzione Arps da valutare, es. arps_esponenziale.
+            n_samples (int): Numero di campioni MC. Default: 300.
+
+        Returns:
+            tuple[np.ndarray | None, np.ndarray | None]: Coppia (q_low, q_high)
+                con i percentili 2.5 e 97.5 per ogni punto in t.
+                Restituisce (None, None) se pcov non è finita o i campioni validi
+                sono meno di 10.
+        """
         try:
             if pcov is None or not np.all(np.isfinite(pcov)):
                 return None, None
@@ -407,6 +466,21 @@ elif sezione == "🚨 Anomaly Monitor":
 
     @st.cache_data
     def prepara_anomaly(pozzo, contam, n_est):
+        """Addestra Isolation Forest e calcola anomaly score per un pozzo.
+
+        Costruisce feature ingegneristiche (GOR, watercut, rolling mean, diff),
+        normalizza con MinMaxScaler e applica IsolationForest.
+
+        Args:
+            pozzo (str): Codice WELL_BORE_CODE del pozzo da analizzare.
+            contam (float): Frazione attesa di anomalie (parametro contamination
+                di IsolationForest), nell'intervallo (0, 0.5].
+            n_est (int): Numero di alberi dell'ensemble IsolationForest.
+
+        Returns:
+            pd.DataFrame: Dati giornalieri del pozzo arricchiti con colonne
+                ANOMALY_IF (-1 anomalia, 1 normale) e ANOMALY_SCORE (score grezzo).
+        """
         from sklearn.ensemble import IsolationForest
         from sklearn.preprocessing import MinMaxScaler
         df_p = df[df['WELL_BORE_CODE']==pozzo].copy().sort_values('DATEPRD').reset_index(drop=True)
@@ -513,6 +587,24 @@ elif sezione == "⚙️ Well Optimizer":
 
     @st.cache_data(ttl=0)
     def prepara_simulatore(pozzo):
+        """Addestra il simulatore GBR choke-produzione per il Well Optimizer.
+
+        Filtra i giorni con choke disponibile, crea feature ingegneristiche,
+        addestra un GradientBoostingRegressor e calcola i valori baseline
+        dagli ultimi 30 giorni del dataset filtrato.
+
+        Args:
+            pozzo (str): Codice WELL_BORE_CODE del pozzo da simulare.
+
+        Returns:
+            tuple: (sim, baseline, mape, r2, feats) dove:
+                sim (GradientBoostingRegressor): Modello addestrato.
+                baseline (dict): Valori medi degli ultimi 30 gg con chiavi
+                    'olio', 'watercut', 'gor', 'pressure', 'choke', 'choke_curve'.
+                mape (float): MAPE % sul test set del simulatore.
+                r2 (float): R² sul test set del simulatore.
+                feats (list[str]): Lista delle feature usate dal modello.
+        """
         from sklearn.ensemble import GradientBoostingRegressor
         from sklearn.model_selection import train_test_split
         from sklearn.metrics import mean_absolute_percentage_error
@@ -561,6 +653,19 @@ elif sezione == "⚙️ Well Optimizer":
         )
 
     def simula(choke_pct, bl):
+        """Stima la produzione giornaliera per un dato valore di choke.
+
+        Interpola la curva choke-produzione empirica e applica il rapporto
+        rispetto alla condizione baseline, clippando tra 0.3x e 2.0x.
+
+        Args:
+            choke_pct (float): Apertura choke target in percentuale (0-100).
+            bl (dict): Dizionario baseline con chiavi 'olio', 'choke' e
+                'choke_curve' (DataFrame con colonne choke_mid e oil_mean).
+
+        Returns:
+            float: Produzione stimata in Sm³/giorno.
+        """
         curve = bl['choke_curve']
         cv, ov = curve['choke_mid'].values, curve['oil_mean'].values
         q_c = float(np.interp(choke_pct, cv, ov))
