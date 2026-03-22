@@ -746,6 +746,67 @@ elif sezione == "⚙️ Well Optimizer":
     )
     st.plotly_chart(fc, use_container_width=True)
 
+    # ── Sensitivity Analysis — Prezzo Brent ──────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 📈 Sensitivity Analysis — Prezzo Brent")
+
+    prezzi_range = np.arange(40, 125, 5)
+    q_baseline   = simula(baseline['choke'], baseline)
+    ricavi_range = [q_baseline * BBL_PER_SM3 * p for p in prezzi_range]
+
+    fig_sa = go.Figure()
+
+    # banda range operativo tipico $60–$100
+    fig_sa.add_vrect(
+        x0=60, x1=100,
+        fillcolor="rgba(52, 152, 219, 0.12)",
+        layer="below", line_width=0,
+        annotation_text="Range operativo tipico",
+        annotation_position="top left",
+        annotation_font_size=11,
+    )
+
+    # linea ricavo
+    fig_sa.add_trace(go.Scatter(
+        x=prezzi_range, y=ricavi_range,
+        mode='lines+markers',
+        line=dict(color='#2ecc71', width=2.5),
+        marker=dict(size=5),
+        name='Ricavo giornaliero',
+    ))
+
+    # linea verticale prezzo Brent attuale
+    fig_sa.add_vline(
+        x=prezzo_olio,
+        line_dash='dash', line_color='#e74c3c', line_width=1.8,
+        annotation_text=f"Brent attuale ${prezzo_olio:.0f}",
+        annotation_position="top right",
+        annotation_font_color='#e74c3c',
+    )
+
+    fig_sa.update_layout(
+        title="Sensitivity Analysis — Ricavo vs Prezzo Brent",
+        xaxis_title="Prezzo Brent (USD/bbl)",
+        yaxis_title="Ricavo giornaliero (USD)",
+        height=400,
+        hovermode='x unified',
+        margin=dict(l=10, r=10, t=45, b=10),
+    )
+    st.plotly_chart(fig_sa, use_container_width=True)
+
+    # tabella 5 scenari
+    scenari_prezzi = [40, 60, 80, 100, 120]
+    scenari_rows = []
+    for sp in scenari_prezzi:
+        r_day   = q_baseline * BBL_PER_SM3 * sp
+        r_month = r_day * 30
+        scenari_rows.append({
+            "Prezzo Brent ($/bbl)": f"${sp}",
+            "Ricavo giornaliero (USD)": f"${r_day:,.0f}",
+            "Ricavo mensile (USD)":     f"${r_month:,.0f}",
+        })
+    st.dataframe(pd.DataFrame(scenari_rows), use_container_width=True, hide_index=True)
+
     st.markdown("---")
     st.markdown("#### 🤖 Ottimizzazione bayesiana (Optuna)")
 
