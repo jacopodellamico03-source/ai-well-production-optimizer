@@ -1,10 +1,6 @@
 # Dataset
 data/*.xls
 
-# Trained models
-models/*.pkl
-models/*.keras
-models/*.h5
 
 # Python
 __pycache__/
