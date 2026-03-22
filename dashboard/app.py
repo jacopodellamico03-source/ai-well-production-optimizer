@@ -288,6 +288,50 @@ elif sezione == "📈 Production Forecast":
         st.markdown("#### 📋 Performance modelli")
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
+    # ── EUR — Estimated Ultimate Recovery ────────────────────────────────────
+    def calcola_eur(modello, params, q_lim=50, dt=1):
+        t, q, eur = 0, modello(0, *params), 0
+        while q > q_lim and t < 10000:
+            eur += q * dt
+            t += dt
+            q = modello(t, *params)
+        return eur / 1e6  # milioni di Sm³
+
+    prod_cum_reale = df_p['BORE_OIL_VOL'].sum() / 1e6
+
+    eur_esp  = calcola_eur(arps_esponenziale, p_esp)  if p_esp  is not None else None
+    eur_iper = calcola_eur(arps_iperbolica,   p_iper) if p_iper is not None else None
+
+    if eur_esp is not None or eur_iper is not None:
+        st.markdown("---")
+        st.markdown("#### 📦 EUR — Estimated Ultimate Recovery")
+
+        e1, e2, e3 = st.columns(3)
+        e1.metric("EUR Esponenziale",          f"{eur_esp:.3f} M Sm³"  if eur_esp  is not None else "N/D")
+        e2.metric("EUR Iperbolico",            f"{eur_iper:.3f} M Sm³" if eur_iper is not None else "N/D")
+        e3.metric("Produzione cumulativa reale", f"{prod_cum_reale:.3f} M Sm³")
+
+        bar_labels, bar_values, bar_colors = [], [], []
+        if eur_esp  is not None:
+            bar_labels.append("EUR Esponenziale"); bar_values.append(eur_esp);        bar_colors.append('#3498db')
+        if eur_iper is not None:
+            bar_labels.append("EUR Iperbolico");   bar_values.append(eur_iper);       bar_colors.append('#e67e22')
+        bar_labels.append("Prod. cumulativa reale"); bar_values.append(prod_cum_reale); bar_colors.append('#95a5a6')
+
+        fig_eur = go.Figure(go.Bar(
+            x=bar_labels, y=bar_values,
+            marker_color=bar_colors,
+            text=[f"{v:.3f}" for v in bar_values],
+            textposition='outside'
+        ))
+        fig_eur.update_layout(
+            title=f'EUR vs Produzione reale — {POZZI_LABEL[pozzo]}',
+            yaxis_title='Milioni di Sm³',
+            height=350, showlegend=False,
+            yaxis=dict(range=[0, max(bar_values) * 1.25])
+        )
+        st.plotly_chart(fig_eur, use_container_width=True)
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ANOMALY MONITOR
