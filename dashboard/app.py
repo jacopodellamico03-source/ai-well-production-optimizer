@@ -153,6 +153,66 @@ if sezione == "🏠 Home":
                              height=300, hovermode='x unified')
         st.plotly_chart(fig_b, use_container_width=True)
 
+    # ── Confronto multi-pozzo ─────────────────────────────────────────────────
+    @st.cache_data
+    def calcola_stats_multipozzo(_df, _df_brent):
+        rows = []
+        for pozzo in POZZI:
+            dp = _df[_df['WELL_BORE_CODE'] == pozzo].copy()
+            dp = dp[dp['BORE_OIL_VOL'] > 0].sort_values('DATEPRD').reset_index(drop=True)
+            if len(dp) == 0:
+                continue
+            prezzo, _ = get_prezzo_medio_brent(dp, _df_brent)
+            cum_sm3   = dp['BORE_OIL_VOL'].sum()
+            ricavo_m  = cum_sm3 * BBL_PER_SM3 * prezzo / 1e6
+            rows.append({
+                'Pozzo':                      POZZI_LABEL[pozzo],
+                'Giorni produzione':          len(dp),
+                'Prod. cumulativa (M Sm³)':   round(cum_sm3 / 1e6, 3),
+                'Portata media (Sm³/g)':      round(dp['BORE_OIL_VOL'].mean(), 1),
+                'Portata massima (Sm³/g)':    round(dp['BORE_OIL_VOL'].max(), 1),
+                'Portata finale (Sm³/g)':     round(dp['BORE_OIL_VOL'].iloc[-1], 1),
+                'Ricavo stimato (M USD)':     round(ricavo_m, 2),
+            })
+        return pd.DataFrame(rows)
+
+    st.markdown("---")
+    st.markdown("#### 📊 Confronto multi-pozzo")
+
+    df_stats = calcola_stats_multipozzo(df, df_brent)
+    st.dataframe(df_stats, use_container_width=True, hide_index=True)
+
+    # Grafico grouped bar: produzione cumulativa e ricavo stimato
+    fig_mp = go.Figure()
+    fig_mp.add_trace(go.Bar(
+        name='Prod. cumulativa (M Sm³)',
+        x=df_stats['Pozzo'],
+        y=df_stats['Prod. cumulativa (M Sm³)'],
+        marker_color='#3498db',
+        text=df_stats['Prod. cumulativa (M Sm³)'].apply(lambda v: f"{v:.3f}"),
+        textposition='outside',
+        yaxis='y'
+    ))
+    fig_mp.add_trace(go.Bar(
+        name='Ricavo stimato (M USD)',
+        x=df_stats['Pozzo'],
+        y=df_stats['Ricavo stimato (M USD)'],
+        marker_color='#2ecc71',
+        text=df_stats['Ricavo stimato (M USD)'].apply(lambda v: f"{v:.1f}"),
+        textposition='outside',
+        yaxis='y2'
+    ))
+    fig_mp.update_layout(
+        title='Produzione cumulativa e ricavo stimato per pozzo',
+        barmode='group',
+        xaxis_title='Pozzo',
+        yaxis=dict(title='M Sm³', side='left'),
+        yaxis2=dict(title='M USD', side='right', overlaying='y'),
+        height=400,
+        legend=dict(orientation='h', yanchor='bottom', y=1.02)
+    )
+    st.plotly_chart(fig_mp, use_container_width=True)
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # PRODUCTION FORECAST
 # ═══════════════════════════════════════════════════════════════════════════════
