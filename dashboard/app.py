@@ -89,7 +89,7 @@ st.sidebar.title("🛢️ Well Production Optimizer")
 st.sidebar.markdown("**Campo Volve — Mare del Nord**")
 st.sidebar.markdown("---")
 sezione = st.sidebar.radio("Navigazione",
-    ["🏠 Home", "📈 Production Forecast", "🚨 Anomaly Monitor", "⚙️ Well Optimizer"])
+    ["🏠 Home", "📈 Production Forecast", "🚨 Anomaly Monitor", "⚙️ Well Optimizer", "🔮 What-if Analysis"])
 st.sidebar.markdown("---")
 st.sidebar.caption("Dataset: Equinor Volve Field (2007–2016)")
 if df_brent is not None:
@@ -639,3 +639,122 @@ elif sezione == "⚙️ Well Optimizer":
                   f"{(r_ott/ricavo_base-1)*100:.1f}%" if ricavo_base>0 else "N/A")
     else:
         st.info("Configura i parametri e premi **▶️ Esegui ottimizzazione** per avviare.")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# WHAT-IF ANALYSIS
+# ═══════════════════════════════════════════════════════════════════════════════
+elif sezione == "🔮 What-if Analysis":
+    st.title("🔮 What-if Analysis")
+    st.markdown("Simula l'impatto di un cambio di apertura choke sulla produzione futura")
+
+    pozzo_wi = st.selectbox("Seleziona pozzo", POZZI, format_func=lambda x: POZZI_LABEL[x], key="pozzo_wi")
+
+    # ── Fit Arps esponenziale sui dati reali del pozzo ───────────────────────
+    df_wi = df[df['WELL_BORE_CODE'] == pozzo_wi].copy()
+    df_wi = df_wi[df_wi['BORE_OIL_VOL'] > 0].sort_values('DATEPRD').reset_index(drop=True)
+    df_wi['DAYS'] = (df_wi['DATEPRD'] - df_wi['DATEPRD'].min()).dt.days
+    t_wi, q_wi = df_wi['DAYS'].values, df_wi['BORE_OIL_VOL'].values
+
+    p_wi = None
+    try:
+        p_wi, _ = curve_fit(arps_esponenziale, t_wi, q_wi, p0=[q_wi[0], 0.001], maxfev=5000)
+    except Exception:
+        st.error("Impossibile fittare la curva Arps esponenziale per questo pozzo.")
+
+    # ── Choke baseline dai dati reali (media ultimi 30 gg con choke notna) ───
+    choke_base_series = df_wi['AVG_CHOKE_SIZE_P'].dropna()
+    choke_baseline = float(choke_base_series.tail(30).mean()) if len(choke_base_series) >= 1 else 50.0
+
+    # ── Prezzo Brent: media ultimi 365 giorni disponibili nel dataset ────────
+    if df_brent is not None:
+        prezzo_wi = float(df_brent['BRENT'].dropna().tail(365).mean())
+        brent_label = f"${prezzo_wi:.2f}/bbl (media ultimi 365 gg dataset EIA)"
+    else:
+        prezzo_wi = 80.0
+        brent_label = "$80.00/bbl (fallback)"
+
+    st.markdown("---")
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        choke_target = st.slider("Apertura choke target (%)", 10, 100,
+                                  int(np.clip(choke_baseline, 10, 100)), 1)
+    with c2:
+        orizzonte = st.select_slider("Orizzonte temporale (giorni)",
+                                      options=[30, 60, 90, 180], value=90)
+    with c3:
+        st.metric("Choke baseline", f"{choke_baseline:.1f}%")
+        st.caption(f"Brent proxy: {brent_label}")
+
+    if p_wi is not None:
+        qi_fit, Di_fit = p_wi
+
+        # Produzione baseline all'ultimo giorno storico
+        t_last   = int(t_wi[-1])
+        q_last   = float(arps_esponenziale(t_last, qi_fit, Di_fit))
+
+        # Il rapporto choke modula il tasso di decline:
+        # choke più aperto → decline più lento (moltiplicatore su Di)
+        # choke più chiuso → decline più veloce
+        ratio = choke_target / choke_baseline if choke_baseline > 0 else 1.0
+        Di_target = Di_fit / np.clip(ratio, 0.1, 5.0)
+
+        giorni = np.arange(1, orizzonte + 1)
+        q_base_fc   = np.array([arps_esponenziale(t_last + g, qi_fit, Di_fit)    for g in giorni])
+        q_target_fc = np.array([arps_esponenziale(t_last + g, q_last, Di_target) for g in giorni])
+        q_base_fc   = np.maximum(q_base_fc,   0)
+        q_target_fc = np.maximum(q_target_fc, 0)
+
+        cum_base   = np.cumsum(q_base_fc)
+        cum_target = np.cumsum(q_target_fc)
+
+        date_fc = pd.date_range(df_wi['DATEPRD'].max() + pd.Timedelta(days=1), periods=orizzonte, freq='D')
+
+        # ── Grafico doppio: portata + cumulativa ─────────────────────────────
+        fig_wi = go.Figure()
+
+        fig_wi.add_trace(go.Scatter(
+            x=date_fc, y=q_base_fc,
+            mode='lines', line=dict(color='#95a5a6', width=2, dash='dash'),
+            name=f'Baseline ({choke_baseline:.1f}%)'))
+        fig_wi.add_trace(go.Scatter(
+            x=date_fc, y=q_target_fc,
+            mode='lines', line=dict(color='#2ecc71', width=2),
+            name=f'Choke target ({choke_target}%)'))
+        fig_wi.add_trace(go.Scatter(
+            x=date_fc, y=cum_base,
+            mode='lines', line=dict(color='#bdc3c7', width=1.5, dash='dot'),
+            name='Cum. baseline', yaxis='y2'))
+        fig_wi.add_trace(go.Scatter(
+            x=date_fc, y=cum_target,
+            mode='lines', line=dict(color='#27ae60', width=1.5, dash='dot'),
+            name='Cum. target', yaxis='y2'))
+
+        fig_wi.update_layout(
+            title=f'What-if Analysis — {POZZI_LABEL[pozzo_wi]}',
+            xaxis_title='Data',
+            yaxis=dict(title='Portata giornaliera (Sm³/g)'),
+            yaxis2=dict(title='Produzione cumulativa (Sm³)', overlaying='y', side='right'),
+            hovermode='x unified', height=460,
+            legend=dict(orientation='h', yanchor='bottom', y=1.02)
+        )
+        st.plotly_chart(fig_wi, use_container_width=True)
+
+        # ── KPI ──────────────────────────────────────────────────────────────
+        tot_base   = float(cum_base[-1])
+        tot_target = float(cum_target[-1])
+        rev_base   = tot_base   * BBL_PER_SM3 * prezzo_wi
+        rev_target = tot_target * BBL_PER_SM3 * prezzo_wi
+        delta_rev  = rev_target - rev_base
+
+        st.markdown("---")
+        st.markdown(f"#### 📊 KPI — orizzonte {orizzonte} giorni")
+        k1, k2, k3, k4, k5 = st.columns(5)
+        k1.metric("Prod. cum. baseline",    f"{tot_base:,.0f} Sm³")
+        k2.metric("Prod. cum. target",      f"{tot_target:,.0f} Sm³",
+                  delta=f"{tot_target - tot_base:+,.0f} Sm³")
+        k3.metric("Ricavo cum. baseline",   f"${rev_base:,.0f}")
+        k4.metric("Ricavo cum. target",     f"${rev_target:,.0f}")
+        k5.metric("Delta ricavo",           f"${delta_rev:+,.0f}",
+                  delta=f"{(delta_rev/rev_base*100):+.1f}%" if rev_base > 0 else None)
+    else:
+        st.info("Fit Arps non disponibile — seleziona un altro pozzo.")
