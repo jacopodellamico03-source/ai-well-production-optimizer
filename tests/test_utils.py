@@ -1,13 +1,11 @@
 """
-Test unitari per le funzioni core di dashboard/app.py.
+Test unitari per le funzioni core in utils/data.py e utils/models.py.
 
 Strategia di import:
-- streamlit e plotly vengono mockati prima dell'import per evitare che
-  il codice UI venga eseguito a livello di modulo.
-- pd.read_excel viene patchato con un DataFrame vuoto per evitare la
-  dipendenza dal file Excel durante i test.
-- simula() è una funzione annidata in un blocco condizionale e non è
-  importabile: viene replicata localmente con la stessa identica logica.
+- streamlit viene mockato prima dell'import per evitare che i decoratori
+  @st.cache_data / @st.cache_resource richiedano un contesto Streamlit attivo.
+- plotly viene mockato perché importato da dashboard/app.py (non usato qui).
+- simula() è importata direttamente da utils.models.
 """
 
 import sys
@@ -17,7 +15,7 @@ import pandas as pd
 import pytest
 from unittest.mock import MagicMock, patch
 
-# ── 1. Mock streamlit (deve avvenire prima dell'import di app) ────────────────
+# ── 1. Mock streamlit (deve avvenire prima dell'import di utils) ──────────────
 def _cache_passthrough(func=None, **kw):
     """Rimpiazza st.cache_data / st.cache_resource con un no-op."""
     if callable(func):
@@ -29,7 +27,7 @@ _st.cache_data     = _cache_passthrough
 _st.cache_resource = _cache_passthrough
 sys.modules['streamlit'] = _st
 
-# ── 2. Mock plotly (non necessario nei test, ma importato da app) ─────────────
+# ── 2. Mock plotly ────────────────────────────────────────────────────────────
 sys.modules['plotly']               = MagicMock()
 sys.modules['plotly.graph_objects'] = MagicMock()
 
@@ -38,24 +36,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-# ── 4. Import di app con pd.read_excel patchato ───────────────────────────────
-_empty_df = pd.DataFrame(columns=[
-    'WELL_BORE_CODE', 'BORE_OIL_VOL', 'DATEPRD',
-    'BORE_GAS_VOL',   'BORE_WAT_VOL', 'AVG_DOWNHOLE_PRESSURE',
-    'AVG_CHOKE_SIZE_P', 'ON_STREAM_HRS',
-])
-with patch('pandas.read_excel', return_value=_empty_df):
-    from dashboard.app import arps_esponenziale, get_prezzo_medio_brent, BBL_PER_SM3
-
-# ── 5. Replica locale di simula() (annidata in blocco condizionale) ───────────
-def _simula(choke_pct, bl):
-    """Replica identica di simula() da dashboard/app.py."""
-    curve = bl['choke_curve']
-    cv, ov = curve['choke_mid'].values, curve['oil_mean'].values
-    q_c   = float(np.interp(choke_pct, cv, ov))
-    q_b   = float(np.interp(bl['choke'], cv, ov))
-    ratio = np.clip((q_c / q_b) if q_b > 0 else 1.0, 0.3, 2.0)
-    return bl['olio'] * ratio
+# ── 4. Import da utils ────────────────────────────────────────────────────────
+from utils.data import get_prezzo_medio_brent, BBL_PER_SM3
+from utils.models import arps_esponenziale, simula
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -122,7 +105,7 @@ def test_simula_ritorna_float_positivo():
         'oil_mean':  [50.0, 100.0, 150.0, 180.0, 200.0],
     })
     bl = {'olio': 150.0, 'choke': 50.0, 'choke_curve': choke_curve}
-    result = _simula(60.0, bl)
+    result = simula(60.0, bl)
     assert isinstance(result, float)
     assert result > 0
 

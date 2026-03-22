@@ -2,9 +2,18 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import pickle
 import os
 from scipy.optimize import curve_fit
+
+from utils.data import (
+    carica_dati, carica_brent, carica_modelli_xgb,
+    get_prezzo_medio_brent, calcola_stats_multipozzo,
+    POZZI, POZZI_LABEL, BBL_PER_SM3,
+)
+from utils.models import (
+    arps_esponenziale, arps_iperbolica, ci_arps,
+    prepara_anomaly, prepara_simulatore, simula,
+)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -20,100 +29,9 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-POZZI = ['NO 15/9-F-14 H', 'NO 15/9-F-12 H', 'NO 15/9-F-11 H']
-POZZI_LABEL = {'NO 15/9-F-14 H': 'F-14 H', 'NO 15/9-F-12 H': 'F-12 H', 'NO 15/9-F-11 H': 'F-11 H'}
-BBL_PER_SM3 = 6.29
-
-# ── CARICAMENTO DATI ──────────────────────────────────────────────────────────
-@st.cache_data
-def carica_dati():
-    """Carica il dataset di produzione Volve dal file Excel.
-
-    Returns:
-        pd.DataFrame: Dati grezzi di produzione con tutte le colonne originali.
-    """
-    return pd.read_excel(os.path.join(BASE_DIR, 'data', 'Volve production data.xlsx'))
-
-@st.cache_data
-def carica_brent():
-    """Carica i prezzi storici del Brent grezzo dal dataset EIA (CSV).
-
-    Returns:
-        pd.DataFrame | None: DataFrame con indice DATE e colonna BRENT (USD/bbl),
-            oppure None se il file non è disponibile o contiene errori.
-    """
-    try:
-        path = os.path.join(BASE_DIR, 'data', 'brent_prices.csv')
-        df_b = pd.read_csv(path, parse_dates=['observation_date'])
-        df_b.columns = ['DATE', 'BRENT']
-        df_b['BRENT'] = pd.to_numeric(df_b['BRENT'], errors='coerce')
-        df_b = df_b.dropna().set_index('DATE')
-        return df_b
-    except Exception:
-        return None
-
-@st.cache_resource
-def carica_modelli_xgb():
-    """Carica i modelli XGBoost e i relativi scaler per tutti e tre i pozzi.
-
-    Returns:
-        dict[str, tuple]: Dizionario che mappa il nome del pozzo a una coppia
-            (XGBRegressor, MinMaxScaler). Se un modello non è trovato su disco,
-            la coppia corrispondente è (None, None).
-    """
-    modelli = {}
-    mapping = {
-        'NO 15/9-F-14 H': ('xgboost_F14H.pkl', 'scaler_F14H.pkl'),
-        'NO 15/9-F-12 H': ('xgboost_F12H.pkl', 'scaler_F12H.pkl'),
-        'NO 15/9-F-11 H': ('xgboost_F11H.pkl', 'scaler_F11H.pkl'),
-    }
-    for well, (xgb_file, scaler_file) in mapping.items():
-        try:
-            with open(os.path.join(BASE_DIR, 'models', xgb_file), 'rb') as f:
-                xgb = pickle.load(f)
-            with open(os.path.join(BASE_DIR, 'models', scaler_file), 'rb') as f:
-                scaler = pickle.load(f)
-            modelli[well] = (xgb, scaler)
-        except Exception:
-            modelli[well] = (None, None)
-    return modelli
-
-def get_prezzo_medio_brent(df_prod, df_brent, fallback=80.0):
-    """Calcola il prezzo medio del Brent nel periodo operativo di un pozzo.
-
-    Args:
-        df_prod (pd.DataFrame): Dati di produzione del pozzo con colonna DATEPRD.
-        df_brent (pd.DataFrame | None): Prezzi Brent con indice di tipo DatetimeIndex
-            e colonna BRENT. Può essere None se il dataset non è disponibile.
-        fallback (float): Prezzo in USD/bbl da usare se i dati Brent non coprono
-            il periodo del pozzo. Default: 80.0.
-
-    Returns:
-        tuple[float, bool]: Coppia (prezzo, trovato) dove prezzo è il Brent medio
-            in USD/bbl e trovato indica se il prezzo proviene da dati reali (True)
-            o dal valore di fallback (False).
-    """
-    if df_brent is None or len(df_prod) == 0:
-        return fallback, False
-    try:
-        d_min = pd.Timestamp(df_prod['DATEPRD'].min())
-        d_max = pd.Timestamp(df_prod['DATEPRD'].max())
-        subset = df_brent[(df_brent.index >= d_min) & (df_brent.index <= d_max)]['BRENT'].dropna()
-        if len(subset) > 0:
-            return round(float(subset.mean()), 2), True
-        return fallback, False
-    except Exception:
-        return fallback, False
-
-df        = carica_dati()
-df_brent  = carica_brent()
+df          = carica_dati()
+df_brent    = carica_brent()
 xgb_modelli = carica_modelli_xgb()
-
-def arps_esponenziale(t, qi, Di):
-    return qi * np.exp(-Di * t)
-
-def arps_iperbolica(t, qi, Di, b):
-    return qi / (1 + b * Di * t) ** (1 / b)
 
 # ── SIDEBAR ───────────────────────────────────────────────────────────────────
 st.sidebar.title("🛢️ Well Production Optimizer")
@@ -185,39 +103,6 @@ if sezione == "🏠 Home":
         st.plotly_chart(fig_b, use_container_width=True)
 
     # ── Confronto multi-pozzo ─────────────────────────────────────────────────
-    @st.cache_data
-    def calcola_stats_multipozzo(_df, _df_brent):
-        """Calcola statistiche di produzione e ricavo per tutti i pozzi.
-
-        Args:
-            _df (pd.DataFrame): Dataset completo di produzione Volve.
-            _df_brent (pd.DataFrame | None): Prezzi Brent storici EIA.
-
-        Returns:
-            pd.DataFrame: Tabella con una riga per pozzo e colonne:
-                Pozzo, Giorni produzione, Prod. cumulativa (M Sm³),
-                Portata media/massima/finale (Sm³/g), Ricavo stimato (M USD).
-        """
-        rows = []
-        for pozzo in POZZI:
-            dp = _df[_df['WELL_BORE_CODE'] == pozzo].copy()
-            dp = dp[dp['BORE_OIL_VOL'] > 0].sort_values('DATEPRD').reset_index(drop=True)
-            if len(dp) == 0:
-                continue
-            prezzo, _ = get_prezzo_medio_brent(dp, _df_brent)
-            cum_sm3   = dp['BORE_OIL_VOL'].sum()
-            ricavo_m  = cum_sm3 * BBL_PER_SM3 * prezzo / 1e6
-            rows.append({
-                'Pozzo':                      POZZI_LABEL[pozzo],
-                'Giorni produzione':          len(dp),
-                'Prod. cumulativa (M Sm³)':   round(cum_sm3 / 1e6, 3),
-                'Portata media (Sm³/g)':      round(dp['BORE_OIL_VOL'].mean(), 1),
-                'Portata massima (Sm³/g)':    round(dp['BORE_OIL_VOL'].max(), 1),
-                'Portata finale (Sm³/g)':     round(dp['BORE_OIL_VOL'].iloc[-1], 1),
-                'Ricavo stimato (M USD)':     round(ricavo_m, 2),
-            })
-        return pd.DataFrame(rows)
-
     st.markdown("---")
     st.markdown("#### 📊 Confronto multi-pozzo")
 
@@ -284,45 +169,6 @@ elif sezione == "📈 Production Forecast":
         mape_iper = np.mean(np.abs((q-q_i)/np.where(q>0,q,1)))*100
         r2_iper   = 1 - np.sum((q-q_i)**2)/np.sum((q-q.mean())**2)
     except Exception: p_iper = None
-
-    def ci_arps(params, pcov, t, model_fn, n_samples=300):
-        """Calcola l'intervallo di confidenza al 95% per una curva Arps via Monte Carlo.
-
-        Campiona n_samples vettori di parametri dalla distribuzione normale multivariata
-        N(params, pcov) e calcola i percentili 2.5 e 97.5 della distribuzione delle curve.
-
-        Args:
-            params (array-like): Parametri ottimali restituiti da curve_fit.
-            pcov (np.ndarray): Matrice di covarianza dei parametri restituita da curve_fit.
-            t (np.ndarray): Array di tempi (giorni) su cui valutare la curva.
-            model_fn (callable): Funzione Arps da valutare, es. arps_esponenziale.
-            n_samples (int): Numero di campioni MC. Default: 300.
-
-        Returns:
-            tuple[np.ndarray | None, np.ndarray | None]: Coppia (q_low, q_high)
-                con i percentili 2.5 e 97.5 per ogni punto in t.
-                Restituisce (None, None) se pcov non è finita o i campioni validi
-                sono meno di 10.
-        """
-        try:
-            if pcov is None or not np.all(np.isfinite(pcov)):
-                return None, None
-            rng = np.random.default_rng(42)
-            samples = rng.multivariate_normal(params, pcov, size=n_samples)
-            curves = []
-            for s in samples:
-                try:
-                    y = model_fn(t, *s)
-                    if np.all(np.isfinite(y)) and np.all(y >= 0):
-                        curves.append(y)
-                except Exception:
-                    pass
-            if len(curves) < 10:
-                return None, None
-            arr = np.array(curves)
-            return np.percentile(arr, 2.5, axis=0), np.percentile(arr, 97.5, axis=0)
-        except Exception:
-            return None, None
 
     # XGBoost per tutti i pozzi con modello disponibile
     xgb_model, xgb_scaler = xgb_modelli.get(pozzo, (None, None))
@@ -491,41 +337,8 @@ elif sezione == "🚨 Anomaly Monitor":
     with c1: contamination = st.slider("Contaminazione attesa (%)", 1, 15, 5, 1) / 100
     with c2: n_est_if = st.slider("Numero alberi IF", 50, 500, 200, 50)
 
-    @st.cache_data
-    def prepara_anomaly(pozzo, contam, n_est):
-        """Addestra Isolation Forest e calcola anomaly score per un pozzo.
-
-        Costruisce feature ingegneristiche (GOR, watercut, rolling mean, diff),
-        normalizza con MinMaxScaler e applica IsolationForest.
-
-        Args:
-            pozzo (str): Codice WELL_BORE_CODE del pozzo da analizzare.
-            contam (float): Frazione attesa di anomalie (parametro contamination
-                di IsolationForest), nell'intervallo (0, 0.5].
-            n_est (int): Numero di alberi dell'ensemble IsolationForest.
-
-        Returns:
-            pd.DataFrame: Dati giornalieri del pozzo arricchiti con colonne
-                ANOMALY_IF (-1 anomalia, 1 normale) e ANOMALY_SCORE (score grezzo).
-        """
-        from sklearn.ensemble import IsolationForest
-        from sklearn.preprocessing import MinMaxScaler
-        df_p = df[df['WELL_BORE_CODE']==pozzo].copy().sort_values('DATEPRD').reset_index(drop=True)
-        df_p = df_p[df_p['BORE_OIL_VOL']>0].copy().reset_index(drop=True)
-        df_p['GOR']       = df_p['BORE_GAS_VOL']/df_p['BORE_OIL_VOL'].replace(0,np.nan)
-        df_p['WATERCUT']  = df_p['BORE_WAT_VOL']/(df_p['BORE_OIL_VOL']+df_p['BORE_WAT_VOL']).replace(0,np.nan)
-        df_p['OIL_ROLL7'] = df_p['BORE_OIL_VOL'].rolling(7).mean()
-        df_p['OIL_DIFF']  = df_p['BORE_OIL_VOL'].diff()
-        feats = ['BORE_OIL_VOL','GOR','WATERCUT','AVG_DOWNHOLE_PRESSURE','ON_STREAM_HRS','OIL_ROLL7','OIL_DIFF']
-        df_ad = df_p[['DATEPRD']+feats].dropna().reset_index(drop=True)
-        X = MinMaxScaler().fit_transform(df_ad[feats].values)
-        iso = IsolationForest(n_estimators=n_est, contamination=contam, random_state=42)
-        df_ad['ANOMALY_IF']    = iso.fit_predict(X)
-        df_ad['ANOMALY_SCORE'] = iso.score_samples(X)
-        return df_ad
-
     with st.spinner("Esecuzione Isolation Forest..."):
-        df_ad = prepara_anomaly(pozzo_ad, contamination, n_est_if)
+        df_ad = prepara_anomaly(df, pozzo_ad, contamination, n_est_if)
 
     normali  = df_ad[df_ad['ANOMALY_IF']==1]
     anomalie = df_ad[df_ad['ANOMALY_IF']==-1]
@@ -612,62 +425,8 @@ elif sezione == "⚙️ Well Optimizer":
         pen_wc    = st.slider("Penalità watercut alto (%)", 0, 50, 30, help="Se watercut > 90%") / 100
         pen_choke = st.slider("Penalità choke > 85% (%)", 0, 30, 10, help="Rischio coning") / 100
 
-    @st.cache_data(ttl=0)
-    def prepara_simulatore(pozzo):
-        """Addestra il simulatore GBR choke-produzione per il Well Optimizer.
-
-        Filtra i giorni con choke disponibile, crea feature ingegneristiche,
-        addestra un GradientBoostingRegressor e calcola i valori baseline
-        dagli ultimi 30 giorni del dataset filtrato.
-
-        Args:
-            pozzo (str): Codice WELL_BORE_CODE del pozzo da simulare.
-
-        Returns:
-            tuple: (sim, baseline, mape, r2, feats) dove:
-                sim (GradientBoostingRegressor): Modello addestrato.
-                baseline (dict): Valori medi degli ultimi 30 gg con chiavi
-                    'olio', 'watercut', 'gor', 'pressure', 'choke', 'choke_curve'.
-                mape (float): MAPE % sul test set del simulatore.
-                r2 (float): R² sul test set del simulatore.
-                feats (list[str]): Lista delle feature usate dal modello.
-        """
-        from sklearn.ensemble import GradientBoostingRegressor
-        from sklearn.model_selection import train_test_split
-        from sklearn.metrics import mean_absolute_percentage_error
-        df_p = df[df['WELL_BORE_CODE']==pozzo].copy().sort_values('DATEPRD').reset_index(drop=True)
-        df_p = df_p[(df_p['BORE_OIL_VOL']>0)&df_p['AVG_CHOKE_SIZE_P'].notna()].copy().reset_index(drop=True)
-        df_p['GOR']       = df_p['BORE_GAS_VOL']/df_p['BORE_OIL_VOL'].replace(0,np.nan)
-        df_p['WATERCUT']  = df_p['BORE_WAT_VOL']/(df_p['BORE_OIL_VOL']+df_p['BORE_WAT_VOL']).replace(0,np.nan)
-        df_p['OIL_ROLL30']= df_p['BORE_OIL_VOL'].rolling(30).mean()
-        df_p['OIL_RATIO'] = df_p['BORE_OIL_VOL']/df_p['OIL_ROLL30']
-        df_p['CHOKE_BIN'] = pd.cut(df_p['AVG_CHOKE_SIZE_P'], bins=10, labels=False)
-        choke_curve = df_p.groupby('CHOKE_BIN').agg(
-            choke_mid=('AVG_CHOKE_SIZE_P','mean'),
-            oil_mean=('BORE_OIL_VOL','mean')
-        ).dropna().reset_index()
-        feats = ['AVG_CHOKE_SIZE_P','WATERCUT','GOR','AVG_DOWNHOLE_PRESSURE','ON_STREAM_HRS']
-        df_sim = df_p[feats+['BORE_OIL_VOL']].dropna().copy()
-        X,y = df_sim[feats].values, df_sim['BORE_OIL_VOL'].values
-        X_tr,X_te,y_tr,y_te = train_test_split(X,y,test_size=0.2,shuffle=False,random_state=42)
-        sim = GradientBoostingRegressor(n_estimators=300,max_depth=4,learning_rate=0.05,random_state=42)
-        sim.fit(X_tr,y_tr)
-        y_pr = sim.predict(X_te)
-        mape = mean_absolute_percentage_error(y_te,y_pr)*100
-        r2   = 1-np.sum((y_te-y_pr)**2)/np.sum((y_te-y_te.mean())**2)
-        ultimi = df_p.tail(30)
-        baseline = {
-            'olio':        ultimi['BORE_OIL_VOL'].mean(),
-            'watercut':    ultimi['WATERCUT'].mean(),
-            'gor':         ultimi['GOR'].mean(),
-            'pressure':    ultimi['AVG_DOWNHOLE_PRESSURE'].mean(),
-            'choke':       ultimi['AVG_CHOKE_SIZE_P'].mean(),
-            'choke_curve': choke_curve,
-        }
-        return sim, baseline, mape, r2, feats
-
     with st.spinner("Calibrazione simulatore..."):
-        simulatore, baseline, mape_sim, r2_sim, features_sim = prepara_simulatore(pozzo_opt)
+        simulatore, baseline, mape_sim, r2_sim, features_sim = prepara_simulatore(df, pozzo_opt)
 
     # 1.2 — Validazione automatica baseline
     baseline_reale = df_pozzo_tmp.sort_values('DATEPRD').tail(30)['BORE_OIL_VOL'].mean()
@@ -678,27 +437,6 @@ elif sezione == "⚙️ Well Optimizer":
             f"differenza > 20%. Il simulatore è calibrato su un sottoinsieme dei dati "
             f"(giorni con choke disponibile) — i valori potrebbero essere sovrastimati."
         )
-
-    def simula(choke_pct, bl):
-        """Stima la produzione giornaliera per un dato valore di choke.
-
-        Interpola la curva choke-produzione empirica e applica il rapporto
-        rispetto alla condizione baseline, clippando tra 0.3x e 2.0x.
-
-        Args:
-            choke_pct (float): Apertura choke target in percentuale (0-100).
-            bl (dict): Dizionario baseline con chiavi 'olio', 'choke' e
-                'choke_curve' (DataFrame con colonne choke_mid e oil_mean).
-
-        Returns:
-            float: Produzione stimata in Sm³/giorno.
-        """
-        curve = bl['choke_curve']
-        cv, ov = curve['choke_mid'].values, curve['oil_mean'].values
-        q_c = float(np.interp(choke_pct, cv, ov))
-        q_b = float(np.interp(bl['choke'], cv, ov))
-        ratio = np.clip((q_c/q_b) if q_b>0 else 1.0, 0.3, 2.0)
-        return bl['olio'] * ratio
 
     ricavo_base = baseline['olio'] * BBL_PER_SM3 * prezzo_olio
 
