@@ -31,10 +31,11 @@ sys.modules['streamlit'] = _st
 sys.modules['plotly']               = MagicMock()
 sys.modules['plotly.graph_objects'] = MagicMock()
 
-# ── 3. Aggiungi la root del progetto al path ──────────────────────────────────
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+# ── 3. Aggiungi dashboard/ al path (utils/ è dentro dashboard/) ──────────────
+ROOT      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DASHBOARD = os.path.join(ROOT, 'dashboard')
+if DASHBOARD not in sys.path:
+    sys.path.insert(0, DASHBOARD)
 
 # ── 4. Import da utils ────────────────────────────────────────────────────────
 from utils.data import get_prezzo_medio_brent, BBL_PER_SM3

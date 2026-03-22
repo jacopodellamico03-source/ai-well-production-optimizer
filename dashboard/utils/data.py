@@ -4,7 +4,8 @@ import pickle
 import pandas as pd
 import streamlit as st
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# dashboard/utils/data.py  →  three levels up to reach project root
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 POZZI = ['NO 15/9-F-14 H', 'NO 15/9-F-12 H', 'NO 15/9-F-11 H']
 POZZI_LABEL = {
