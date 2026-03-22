@@ -166,21 +166,44 @@ elif sezione == "📈 Production Forecast":
     df_p['DAYS'] = (df_p['DATEPRD'] - df_p['DATEPRD'].min()).dt.days
     t, q  = df_p['DAYS'].values, df_p['BORE_OIL_VOL'].values
 
-    # Arps
+    # Arps — estrai pcov per confidence interval
+    pcov_esp = pcov_iper = None
     try:
-        p_esp, _ = curve_fit(arps_esponenziale, t, q, p0=[q[0], 0.001], maxfev=5000)
+        p_esp, pcov_esp = curve_fit(arps_esponenziale, t, q, p0=[q[0], 0.001], maxfev=5000)
         q_e = arps_esponenziale(t, *p_esp)
         mape_esp = np.mean(np.abs((q - q_e) / np.where(q>0,q,1))) * 100
         r2_esp   = 1 - np.sum((q-q_e)**2) / np.sum((q-q.mean())**2)
     except Exception: p_esp = None
 
     try:
-        p_iper, _ = curve_fit(arps_iperbolica, t, q, p0=[q[0],0.001,0.5],
+        p_iper, pcov_iper = curve_fit(arps_iperbolica, t, q, p0=[q[0],0.001,0.5],
                                bounds=([0,0,0],[1e5,1,2]), maxfev=5000)
         q_i = arps_iperbolica(t, *p_iper)
         mape_iper = np.mean(np.abs((q-q_i)/np.where(q>0,q,1)))*100
         r2_iper   = 1 - np.sum((q-q_i)**2)/np.sum((q-q.mean())**2)
     except Exception: p_iper = None
+
+    def ci_arps(func, params, pcov, t_arr, n_samples=300):
+        """CI al 95% via MC sampling della distribuzione dei parametri."""
+        try:
+            if pcov is None or not np.all(np.isfinite(pcov)):
+                return None, None
+            rng = np.random.default_rng(42)
+            samples = rng.multivariate_normal(params, pcov, size=n_samples)
+            curves = []
+            for s in samples:
+                try:
+                    y = func(t_arr, *s)
+                    if np.all(np.isfinite(y)) and np.all(y >= 0):
+                        curves.append(y)
+                except Exception:
+                    pass
+            if len(curves) < 10:
+                return None, None
+            arr = np.array(curves)
+            return np.percentile(arr, 2.5, axis=0), np.percentile(arr, 97.5, axis=0)
+        except Exception:
+            return None, None
 
     # XGBoost per tutti i pozzi con modello disponibile
     xgb_model, xgb_scaler = xgb_modelli.get(pozzo, (None, None))
@@ -216,10 +239,26 @@ elif sezione == "📈 Production Forecast":
     fig.add_trace(go.Scatter(x=df_p['DATEPRD'], y=df_p['BORE_OIL_VOL'],
         mode='markers', marker=dict(size=3, color='#95a5a6', opacity=0.5), name='Dati reali'))
     if p_esp is not None:
+        lo_e, hi_e = ci_arps(arps_esponenziale, p_esp, pcov_esp, t_fut)
+        if lo_e is not None:
+            fig.add_trace(go.Scatter(
+                x=list(date_fut) + list(date_fut[::-1]),
+                y=list(hi_e) + list(lo_e[::-1]),
+                fill='toself', fillcolor='rgba(52,152,219,0.2)',
+                line=dict(color='rgba(255,255,255,0)'),
+                showlegend=True, name='CI 95% Exp', hoverinfo='skip'))
         fig.add_trace(go.Scatter(x=date_fut, y=arps_esponenziale(t_fut,*p_esp),
             mode='lines', line=dict(color='#3498db',width=2,dash='dash'),
             name=f'Arps Exp (MAPE {mape_esp:.1f}%)'))
     if p_iper is not None:
+        lo_i, hi_i = ci_arps(arps_iperbolica, p_iper, pcov_iper, t_fut)
+        if lo_i is not None:
+            fig.add_trace(go.Scatter(
+                x=list(date_fut) + list(date_fut[::-1]),
+                y=list(hi_i) + list(lo_i[::-1]),
+                fill='toself', fillcolor='rgba(230,126,34,0.2)',
+                line=dict(color='rgba(255,255,255,0)'),
+                showlegend=True, name='CI 95% Iper', hoverinfo='skip'))
         fig.add_trace(go.Scatter(x=date_fut, y=arps_iperbolica(t_fut,*p_iper),
             mode='lines', line=dict(color='#e67e22',width=2,dash='dot'),
             name=f'Arps Iper (MAPE {mape_iper:.1f}%)'))
@@ -406,6 +445,15 @@ elif sezione == "⚙️ Well Optimizer":
 
     with st.spinner("Calibrazione simulatore..."):
         simulatore, baseline, mape_sim, r2_sim, features_sim = prepara_simulatore(pozzo_opt)
+
+    # 1.2 — Validazione automatica baseline
+    baseline_reale = df_pozzo_tmp.sort_values('DATEPRD').tail(30)['BORE_OIL_VOL'].mean()
+    baseline_sim   = baseline['olio']
+    if abs(baseline_sim - baseline_reale) / max(baseline_reale, 1e-6) > 0.20:
+        st.warning(
+            f"⚠️ Baseline simulatore ({baseline_sim:.1f} Sm³/g) differisce dai dati reali "
+            f"({baseline_reale:.1f} Sm³/g) di più del 20%. I risultati potrebbero essere imprecisi."
+        )
 
     def simula(choke_pct, bl):
         curve = bl['choke_curve']
