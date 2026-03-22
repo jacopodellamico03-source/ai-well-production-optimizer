@@ -1,0 +1,19 @@
+# Dataset
+data/*.xlsx
+data/*.xls
+
+# Trained models
+models/*.pkl
+models/*.keras
+models/*.h5
+
+# Python
+__pycache__/
+*.pyc
+.env
+
+# Virtual environment
+venv/
+
+# Jupyter
+.ipynb_checkpoints/

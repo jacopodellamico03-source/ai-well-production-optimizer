@@ -110,6 +110,44 @@ streamlit run dashboard/app.py
 
 ---
 
+## Setup
+
+The dataset and trained models are **not included in this repository** (excluded via `.gitignore`). Follow the steps below to get the project running locally.
+
+### 1. Download the Volve dataset
+
+1. Go to the Equinor Volve Data Village page:
+   `https://www.equinor.com/energy/volve-data-sharing`
+2. Register and download the **Volve production data** package
+3. Locate the file `Volve production data.xlsx` and place it in the `data/` folder:
+   ```
+   data/Volve production data.xlsx
+   ```
+
+The Brent crude price file is already tracked in the repository (`data/brent_prices.csv`).
+
+### 2. Train the XGBoost models
+
+Run the training script to regenerate all three well models:
+
+```bash
+python scripts/train_xgboost_F12H_F11H.py
+```
+
+This script trains `XGBRegressor` (n_estimators=500, max_depth=4, lr=0.05) on wells
+`NO 15/9-F-14 H`, `NO 15/9-F-12 H`, and `NO 15/9-F-11 H` and saves:
+
+```
+models/xgboost_F14H.pkl   models/scaler_F14H.pkl
+models/xgboost_F12H.pkl   models/scaler_F12H.pkl
+models/xgboost_F11H.pkl   models/scaler_F11H.pkl
+```
+
+> **Note:** The LSTM model (`lstm_F14H.keras`) is not re-trained by this script.
+> To regenerate it, run the full notebook `notebooks/02_Decline_Curve_Analysis.ipynb`.
+
+---
+
 ## Author
 
 **Jacopo Dellamico**  
