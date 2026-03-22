@@ -43,14 +43,22 @@ def carica_brent():
 
 @st.cache_resource
 def carica_modelli_xgb():
-    try:
-        with open(os.path.join(BASE_DIR, 'models', 'xgboost_F14H.pkl'), 'rb') as f:
-            xgb = pickle.load(f)
-        with open(os.path.join(BASE_DIR, 'models', 'scaler_F14H.pkl'), 'rb') as f:
-            scaler = pickle.load(f)
-        return xgb, scaler
-    except Exception:
-        return None, None
+    modelli = {}
+    mapping = {
+        'NO 15/9-F-14 H': ('xgboost_F14H.pkl', 'scaler_F14H.pkl'),
+        'NO 15/9-F-12 H': ('xgboost_F12H.pkl', 'scaler_F12H.pkl'),
+        'NO 15/9-F-11 H': ('xgboost_F11H.pkl', 'scaler_F11H.pkl'),
+    }
+    for well, (xgb_file, scaler_file) in mapping.items():
+        try:
+            with open(os.path.join(BASE_DIR, 'models', xgb_file), 'rb') as f:
+                xgb = pickle.load(f)
+            with open(os.path.join(BASE_DIR, 'models', scaler_file), 'rb') as f:
+                scaler = pickle.load(f)
+            modelli[well] = (xgb, scaler)
+        except Exception:
+            modelli[well] = (None, None)
+    return modelli
 
 def get_prezzo_medio_brent(df_prod, df_brent, fallback=80.0):
     """Prezzo Brent medio nel periodo operativo del pozzo. Ritorna (prezzo, bool)."""
@@ -68,7 +76,7 @@ def get_prezzo_medio_brent(df_prod, df_brent, fallback=80.0):
 
 df        = carica_dati()
 df_brent  = carica_brent()
-xgb_model, xgb_scaler = carica_modelli_xgb()
+xgb_modelli = carica_modelli_xgb()
 
 def arps_esponenziale(t, qi, Di):
     return qi * np.exp(-Di * t)
@@ -150,7 +158,7 @@ if sezione == "🏠 Home":
 # ═══════════════════════════════════════════════════════════════════════════════
 elif sezione == "📈 Production Forecast":
     st.title("📈 Production Forecast")
-    st.markdown("Previsione produzione con **Arps Decline Curves** e **XGBoost** (F-14 H)")
+    st.markdown("Previsione produzione con **Arps Decline Curves** e **XGBoost**")
 
     pozzo = st.selectbox("Seleziona pozzo", POZZI, format_func=lambda x: POZZI_LABEL[x])
     df_p  = df[df['WELL_BORE_CODE'] == pozzo].copy()
@@ -174,8 +182,9 @@ elif sezione == "📈 Production Forecast":
         r2_iper   = 1 - np.sum((q-q_i)**2)/np.sum((q-q.mean())**2)
     except Exception: p_iper = None
 
-    # XGBoost solo F-14 H
-    xgb_ok, split = (xgb_model is not None) and (pozzo=='NO 15/9-F-14 H'), None
+    # XGBoost per tutti i pozzi con modello disponibile
+    xgb_model, xgb_scaler = xgb_modelli.get(pozzo, (None, None))
+    xgb_ok, split = (xgb_model is not None), None
     if xgb_ok:
         df_ml = df_p[['DATEPRD','DAYS','BORE_OIL_VOL','BORE_GAS_VOL',
                        'BORE_WAT_VOL','AVG_DOWNHOLE_PRESSURE','AVG_CHOKE_SIZE_P','ON_STREAM_HRS']].copy()
@@ -240,8 +249,6 @@ elif sezione == "📈 Production Forecast":
         st.markdown("#### 📋 Performance modelli")
         st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
-    if pozzo != 'NO 15/9-F-14 H':
-        st.info("XGBoost disponibile solo per F-14 H (pozzo su cui è stato trainato).")
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ANOMALY MONITOR
