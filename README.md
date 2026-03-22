@@ -150,6 +150,6 @@ models/xgboost_F11H.pkl   models/scaler_F11H.pkl
 
 ## Author
 
-**Jacopo Dellamico**  
+**Jacopo Dell'Amico**
 Extracurricular project — Oil & Gas AI/ML  
 [GitHub](https://github.com/jacopodellamico03-source)
