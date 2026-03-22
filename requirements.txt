@@ -7,3 +7,4 @@ xgboost
 optuna
 scipy
 openpyxl
+pytest>=9.0
