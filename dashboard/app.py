@@ -1,3 +1,5 @@
+from typing import Callable, Dict, Optional, Tuple
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -281,7 +283,7 @@ elif sezione == "📈 Production Forecast":
                 st.plotly_chart(fig_fi, use_container_width=True)
 
     # ── EUR — Estimated Ultimate Recovery ────────────────────────────────────
-    def calcola_eur(modello, params, q_lim=50, dt=1):
+    def calcola_eur(modello: Callable, params: np.ndarray, q_lim: float = 50, dt: int = 1) -> float:
         t, q, eur = 0, modello(0, *params), 0
         while q > q_lim and t < 10000:
             eur += q * dt
@@ -768,7 +770,7 @@ elif sezione == "🔧 Predictive Maintenance":
     pozzo_pm = st.selectbox("Seleziona pozzo", POZZI, format_func=lambda x: POZZI_LABEL[x], key="pozzo_pm")
 
     @st.cache_data
-    def train_maintenance_model(pozzo_key, contamination=0.05, n_est_if=200):
+    def train_maintenance_model(pozzo_key: str, contamination: float = 0.05, n_est_if: int = 200) -> Tuple:
         from sklearn.ensemble import IsolationForest, RandomForestClassifier
         from sklearn.metrics import precision_score, recall_score, f1_score
 

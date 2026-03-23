@@ -1,17 +1,19 @@
+from typing import Callable, Optional, Tuple
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 
-def arps_esponenziale(t, qi, Di):
+def arps_esponenziale(t: np.ndarray, qi: float, Di: float) -> np.ndarray:
     return qi * np.exp(-Di * t)
 
 
-def arps_iperbolica(t, qi, Di, b):
+def arps_iperbolica(t: np.ndarray, qi: float, Di: float, b: float) -> np.ndarray:
     return qi / (1 + b * Di * t) ** (1 / b)
 
 
-def ci_arps(params, pcov, t, model_fn, n_samples=300):
+def ci_arps(params: np.ndarray, pcov: np.ndarray, t: np.ndarray, model_fn: Callable, n_samples: int = 300) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
     """Calcola l'intervallo di confidenza al 95% per una curva Arps via Monte Carlo.
 
     Campiona n_samples vettori di parametri dalla distribuzione normale multivariata
@@ -52,7 +54,7 @@ def ci_arps(params, pcov, t, model_fn, n_samples=300):
 
 
 @st.cache_data
-def prepara_anomaly(_df, pozzo, contam, n_est):
+def prepara_anomaly(_df: pd.DataFrame, pozzo: str, contam: float, n_est: int) -> pd.DataFrame:
     """Addestra Isolation Forest e calcola anomaly score per un pozzo.
 
     Costruisce feature ingegneristiche (GOR, watercut, rolling mean, diff),
@@ -87,7 +89,7 @@ def prepara_anomaly(_df, pozzo, contam, n_est):
 
 
 @st.cache_data(ttl=0)
-def prepara_simulatore(_df, pozzo):
+def prepara_simulatore(_df: pd.DataFrame, pozzo: str) -> Tuple:
     """Addestra il simulatore GBR choke-produzione per il Well Optimizer.
 
     Filtra i giorni con choke disponibile, crea feature ingegneristiche,
@@ -142,7 +144,7 @@ def prepara_simulatore(_df, pozzo):
     return sim, baseline, mape, r2, feats
 
 
-def simula(choke_pct, bl):
+def simula(choke_pct: float, bl: dict) -> float:
     """Stima la produzione giornaliera per un dato valore di choke.
 
     Interpola la curva choke-produzione empirica e applica il rapporto

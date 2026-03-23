@@ -1,5 +1,6 @@
 import os
 import pickle
+from typing import Dict, Optional, Tuple
 
 import pandas as pd
 import streamlit as st
@@ -17,7 +18,7 @@ BBL_PER_SM3 = 6.29
 
 
 @st.cache_data
-def carica_dati():
+def carica_dati() -> pd.DataFrame:
     """Carica il dataset di produzione Volve dal file Excel.
 
     Returns:
@@ -27,7 +28,7 @@ def carica_dati():
 
 
 @st.cache_data
-def carica_brent():
+def carica_brent() -> Optional[pd.DataFrame]:
     """Carica i prezzi storici del Brent grezzo dal dataset EIA (CSV).
 
     Returns:
@@ -46,7 +47,7 @@ def carica_brent():
 
 
 @st.cache_resource
-def carica_modelli_xgb():
+def carica_modelli_xgb() -> Dict[str, Tuple]:
     """Carica i modelli XGBoost e i relativi scaler per tutti e tre i pozzi.
 
     Returns:
@@ -72,7 +73,7 @@ def carica_modelli_xgb():
     return modelli
 
 
-def get_prezzo_medio_brent(df_prod, df_brent, fallback=80.0):
+def get_prezzo_medio_brent(df_prod: pd.DataFrame, df_brent: Optional[pd.DataFrame], fallback: float = 80.0) -> Tuple[float, bool]:
     """Calcola il prezzo medio del Brent nel periodo operativo di un pozzo.
 
     Args:
@@ -101,7 +102,7 @@ def get_prezzo_medio_brent(df_prod, df_brent, fallback=80.0):
 
 
 @st.cache_data
-def calcola_stats_multipozzo(_df, _df_brent):
+def calcola_stats_multipozzo(_df: pd.DataFrame, _df_brent: Optional[pd.DataFrame]) -> pd.DataFrame:
     """Calcola statistiche di produzione e ricavo per tutti i pozzi.
 
     Args:
