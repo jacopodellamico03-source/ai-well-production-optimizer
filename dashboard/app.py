@@ -447,6 +447,11 @@ elif sezione == "⚙️ Well Optimizer":
     cp1, cp2, cp3 = st.columns(3)
     with cp1:
         n_trials = st.slider("Trial Optuna", 50, 300, 150, 50)
+        opex_giornaliero = st.number_input(
+            "Costo operativo giornaliero (OPEX, USD/g)",
+            min_value=0, max_value=500000, value=20000, step=1000,
+            help="Stima basata su dati NPD per campi offshore North Sea di dimensioni simili a Volve (~$15-35/boe). Aggiornare quando disponibili dati reali.",
+        )
         st.metric("Prezzo Brent medio periodo", f"${prezzo_olio:.2f}/bbl")
     with cp2:
         choke_min = st.slider("Choke minimo (%)", 10, 50, 20)
@@ -468,7 +473,8 @@ elif sezione == "⚙️ Well Optimizer":
             f"(giorni con choke disponibile) — i valori potrebbero essere sovrastimati."
         )
 
-    ricavo_base = baseline['olio'] * BBL_PER_SM3 * prezzo_olio
+    ricavo_base   = baseline['olio'] * BBL_PER_SM3 * prezzo_olio
+    profitto_base = ricavo_base - opex_giornaliero
 
     st.markdown("---")
     st.markdown("#### 🔧 Simulatore di produzione")
@@ -485,11 +491,13 @@ elif sezione == "⚙️ Well Optimizer":
                            value=float(np.clip(baseline['choke'], choke_min, choke_max)), step=0.5)
     q_man = simula(choke_man, baseline)
     r_man = q_man * BBL_PER_SM3 * prezzo_olio
+    p_man = r_man - opex_giornaliero
 
-    m1,m2,m3 = st.columns(3)
-    m1.metric("Produzione stimata",  f"{q_man:.1f} Sm³/g", delta=f"{q_man-baseline['olio']:+.1f} vs baseline")
-    m2.metric("Ricavo giornaliero",  f"${r_man:,.0f}",     delta=f"${r_man-ricavo_base:+,.0f} vs baseline")
-    m3.metric("Ricavo mensile stimato", f"${r_man*30:,.0f}")
+    m1,m2,m3,m4 = st.columns(4)
+    m1.metric("Produzione stimata",      f"{q_man:.1f} Sm³/g", delta=f"{q_man-baseline['olio']:+.1f} vs baseline")
+    m2.metric("Ricavo lordo",            f"${r_man:,.0f}",     delta=f"${r_man-ricavo_base:+,.0f} vs baseline")
+    m3.metric("Profitto netto",          f"${p_man:,.0f}",     delta=f"${p_man-profitto_base:+,.0f} vs baseline")
+    m4.metric("Profitto mensile stimato", f"${p_man*30:,.0f}")
 
     choke_v = np.linspace(choke_min, choke_max, 150)
     prod_v  = [simula(c, baseline) for c in choke_v]
@@ -518,9 +526,10 @@ elif sezione == "⚙️ Well Optimizer":
     st.markdown("---")
     st.markdown("#### 📈 Sensitivity Analysis — Prezzo Brent")
 
-    prezzi_range = np.arange(40, 125, 5)
-    q_baseline   = simula(baseline['choke'], baseline)
-    ricavi_range = [q_baseline * BBL_PER_SM3 * p for p in prezzi_range]
+    prezzi_range   = np.arange(40, 125, 5)
+    q_baseline     = simula(baseline['choke'], baseline)
+    ricavi_range   = [q_baseline * BBL_PER_SM3 * p for p in prezzi_range]
+    profitti_range = [r - opex_giornaliero for r in ricavi_range]
 
     fig_sa = go.Figure()
 
@@ -534,14 +543,31 @@ elif sezione == "⚙️ Well Optimizer":
         annotation_font_size=11,
     )
 
-    # linea ricavo
+    # linea ricavo lordo
     fig_sa.add_trace(go.Scatter(
         x=prezzi_range, y=ricavi_range,
         mode='lines+markers',
         line=dict(color='#2ecc71', width=2.5),
         marker=dict(size=5),
-        name='Ricavo giornaliero',
+        name='Ricavo lordo',
     ))
+
+    # linea profitto netto
+    fig_sa.add_trace(go.Scatter(
+        x=prezzi_range, y=profitti_range,
+        mode='lines+markers',
+        line=dict(color='#3498db', width=2, dash='dash'),
+        marker=dict(size=5),
+        name='Profitto netto',
+    ))
+
+    # linea break-even (y=0)
+    fig_sa.add_hline(
+        y=0,
+        line_dash='dot', line_color='#e74c3c', line_width=1.5,
+        annotation_text="Break-even", annotation_position="bottom right",
+        annotation_font_color='#e74c3c',
+    )
 
     # linea verticale prezzo Brent attuale
     fig_sa.add_vline(
@@ -553,12 +579,13 @@ elif sezione == "⚙️ Well Optimizer":
     )
 
     fig_sa.update_layout(
-        title="Sensitivity Analysis — Ricavo vs Prezzo Brent",
+        title="Sensitivity Analysis — Ricavo lordo e Profitto netto vs Prezzo Brent",
         xaxis_title="Prezzo Brent (USD/bbl)",
-        yaxis_title="Ricavo giornaliero (USD)",
+        yaxis_title="USD/giorno",
         height=400,
         hovermode='x unified',
         margin=dict(l=10, r=10, t=45, b=10),
+        legend=dict(orientation='h', yanchor='bottom', y=1.02),
     )
     st.plotly_chart(fig_sa, use_container_width=True)
 
@@ -566,12 +593,13 @@ elif sezione == "⚙️ Well Optimizer":
     scenari_prezzi = [40, 60, 80, 100, 120]
     scenari_rows = []
     for sp in scenari_prezzi:
-        r_day   = q_baseline * BBL_PER_SM3 * sp
-        r_month = r_day * 30
+        r_day = q_baseline * BBL_PER_SM3 * sp
+        p_day = r_day - opex_giornaliero
         scenari_rows.append({
-            "Prezzo Brent ($/bbl)": f"${sp}",
-            "Ricavo giornaliero (USD)": f"${r_day:,.0f}",
-            "Ricavo mensile (USD)":     f"${r_month:,.0f}",
+            "Prezzo Brent ($/bbl)":       f"${sp}",
+            "Ricavo lordo/g (USD)":       f"${r_day:,.0f}",
+            "Profitto netto/g (USD)":     f"${p_day:,.0f}",
+            "Profitto mensile (USD)":     f"${p_day*30:,.0f}",
         })
     st.dataframe(pd.DataFrame(scenari_rows), use_container_width=True, hide_index=True)
 
@@ -585,7 +613,7 @@ elif sezione == "⚙️ Well Optimizer":
         def objective(trial):
             ch = trial.suggest_float('choke_pct', float(choke_min), float(choke_max))
             q  = simula(ch, baseline)
-            r  = q * BBL_PER_SM3 * prezzo_olio
+            r  = q * BBL_PER_SM3 * prezzo_olio - opex_giornaliero
             p1 = r * pen_wc    if baseline['watercut'] > 0.90 else 0
             p2 = r * pen_choke if ch > 85 else 0
             return r - p1 - p2
@@ -603,17 +631,20 @@ elif sezione == "⚙️ Well Optimizer":
         choke_ott = study.best_params['choke_pct']
         q_ott     = simula(choke_ott, baseline)
         r_ott     = q_ott * BBL_PER_SM3 * prezzo_olio
+        p_ott     = r_ott - opex_giornaliero
 
         st.success(f"✅ Ottimizzazione completata — {n_trials} trial")
 
-        r1,r2,r3,r4 = st.columns(4)
-        r1.metric("Choke ottimale",        f"{choke_ott:.1f}%",
+        r1,r2,r3,r4,r5 = st.columns(5)
+        r1.metric("Choke ottimale",           f"{choke_ott:.1f}%",
                   delta=f"{choke_ott-baseline['choke']:+.1f}% vs baseline")
-        r2.metric("Produzione ottimizzata", f"{q_ott:.1f} Sm³/g",
+        r2.metric("Produzione ottimizzata",   f"{q_ott:.1f} Sm³/g",
                   delta=f"{q_ott-baseline['olio']:+.1f} vs baseline")
-        r3.metric("Ricavo ottimizzato",     f"${r_ott:,.0f}/g",
+        r3.metric("Ricavo lordo",             f"${r_ott:,.0f}/g",
                   delta=f"${r_ott-ricavo_base:+,.0f} vs baseline")
-        r4.metric("Ricavo mensile aggiuntivo", f"${(r_ott-ricavo_base)*30:,.0f}")
+        r4.metric("Profitto netto",           f"${p_ott:,.0f}/g",
+                  delta=f"${p_ott-profitto_base:+,.0f} vs baseline")
+        r5.metric("Profitto mensile aggiuntivo", f"${(p_ott-profitto_base)*30:,.0f}")
 
         st.markdown("#### 📊 Confronto scenari")
         rows = []
@@ -621,9 +652,12 @@ elif sezione == "⚙️ Well Optimizer":
                           ('Ottimale AI',choke_ott),('Aggressivo',95.0)]:
             q_s = simula(ch, baseline)
             r_s = q_s * BBL_PER_SM3 * prezzo_olio
+            p_s = r_s - opex_giornaliero
             rows.append({'Scenario':nome,'Choke (%)':round(ch,1),
-                         'Olio (Sm³/g)':round(q_s,1),'Ricavo (USD/g)':round(r_s,0),
-                         'Δ vs Baseline':f"${r_s-ricavo_base:+,.0f}"})
+                         'Olio (Sm³/g)':round(q_s,1),
+                         'Ricavo lordo (USD/g)':round(r_s,0),
+                         'Profitto netto (USD/g)':round(p_s,0),
+                         'Δ profitto vs Baseline':f"${p_s-profitto_base:+,.0f}"})
         df_sc = pd.DataFrame(rows)
         st.dataframe(df_sc, use_container_width=True, hide_index=True)
         st.download_button(
@@ -658,12 +692,12 @@ elif sezione == "⚙️ Well Optimizer":
 
         st.markdown("---")
         st.markdown("#### 💰 Business Impact")
-        delta_g = r_ott - ricavo_base
+        delta_g = p_ott - profitto_base
         b1,b2,b3 = st.columns(3)
-        b1.metric("Incremento giornaliero",    f"${delta_g:,.0f}")
-        b2.metric("Incremento annuale stimato", f"${delta_g*365:,.0f}")
-        b3.metric("Incremento % ricavo",
-                  f"{(r_ott/ricavo_base-1)*100:.1f}%" if ricavo_base>0 else "N/A")
+        b1.metric("Incremento profitto giornaliero",     f"${delta_g:,.0f}")
+        b2.metric("Incremento profitto annuale stimato", f"${delta_g*365:,.0f}")
+        b3.metric("Incremento % profitto netto",
+                  f"{(p_ott/profitto_base-1)*100:.1f}%" if profitto_base > 0 else "N/A")
     else:
         st.info("Configura i parametri e premi **▶️ Esegui ottimizzazione** per avviare.")
 
