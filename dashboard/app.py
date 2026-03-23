@@ -38,7 +38,7 @@ st.sidebar.title("🛢️ Well Production Optimizer")
 st.sidebar.markdown("**Campo Volve — Mare del Nord**")
 st.sidebar.markdown("---")
 sezione = st.sidebar.radio("Navigazione",
-    ["🏠 Home", "📈 Production Forecast", "🚨 Anomaly Monitor", "⚙️ Well Optimizer", "🔮 What-if Analysis"])
+    ["🏠 Home", "📈 Production Forecast", "🚨 Anomaly Monitor", "⚙️ Well Optimizer", "🔮 What-if Analysis", "🔧 Predictive Maintenance"])
 st.sidebar.markdown("---")
 st.sidebar.caption("Dataset: Equinor Volve Field (2007–2016)")
 if df_brent is not None:
@@ -749,3 +749,149 @@ elif sezione == "🔮 What-if Analysis":
                   delta=f"{(delta_rev/rev_base*100):+.1f}%" if rev_base > 0 else None)
     else:
         st.info("Fit Arps non disponibile — seleziona un altro pozzo.")
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# PREDICTIVE MAINTENANCE
+# ═══════════════════════════════════════════════════════════════════════════════
+elif sezione == "🔧 Predictive Maintenance":
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.metrics import precision_score, recall_score, f1_score
+
+    st.title("🔧 Predictive Maintenance")
+    st.markdown("Previsione anomalie future con **Random Forest** addestrato su segnali rolling")
+
+    st.warning(
+        "⚠️ Modello addestrato su dati storici limitati (3 pozzi). "
+        "Le previsioni hanno valore indicativo e non operativo."
+    )
+
+    pozzo_pm = st.selectbox("Seleziona pozzo", POZZI, format_func=lambda x: POZZI_LABEL[x], key="pozzo_pm")
+
+    @st.cache_data
+    def train_maintenance_model(pozzo_key, contamination=0.05, n_est_if=200):
+        from sklearn.ensemble import IsolationForest, RandomForestClassifier
+        from sklearn.metrics import precision_score, recall_score, f1_score
+
+        df_pm = df[df['WELL_BORE_CODE'] == pozzo_key].copy()
+        df_pm = df_pm[df_pm['BORE_OIL_VOL'] > 0].sort_values('DATEPRD').reset_index(drop=True)
+
+        # --- Isolation Forest per label anomalie ---
+        feats_if = ['BORE_OIL_VOL', 'GOR', 'WATERCUT', 'AVG_DOWNHOLE_PRESSURE']
+        df_pm['GOR'] = (df_pm['BORE_GAS_VOL'] / df_pm['BORE_OIL_VOL'].replace(0, np.nan)).fillna(0)
+        df_pm['WATERCUT'] = (
+            df_pm['BORE_WAT_VOL'] /
+            (df_pm['BORE_OIL_VOL'] + df_pm['BORE_WAT_VOL']).replace(0, np.nan)
+        ).fillna(0)
+
+        avail = [c for c in feats_if if c in df_pm.columns]
+        X_if = df_pm[avail].fillna(0).values
+        clf_if = IsolationForest(n_estimators=n_est_if, contamination=contamination, random_state=42)
+        df_pm['ANOMALY_IF'] = clf_if.fit_predict(X_if)
+
+        # --- Feature engineering: rolling 7 giorni ---
+        roll_cols = ['BORE_OIL_VOL', 'GOR', 'WATERCUT', 'AVG_DOWNHOLE_PRESSURE']
+        roll_feats = []
+        for col in roll_cols:
+            if col in df_pm.columns:
+                df_pm[f'{col}_roll7_mean'] = df_pm[col].rolling(7, min_periods=1).mean()
+                df_pm[f'{col}_roll7_std']  = df_pm[col].rolling(7, min_periods=1).std().fillna(0)
+                roll_feats += [f'{col}_roll7_mean', f'{col}_roll7_std']
+
+        # --- Target: 1 se nei prossimi 7 giorni c'è almeno una anomalia ---
+        df_pm['IS_ANOMALY'] = (df_pm['ANOMALY_IF'] == -1).astype(int)
+        df_pm['TARGET'] = (
+            df_pm['IS_ANOMALY']
+            .rolling(7, min_periods=1)
+            .max()
+            .shift(-7)
+            .fillna(0)
+            .astype(int)
+        )
+
+        df_model = df_pm[roll_feats + ['TARGET', 'DATEPRD', 'IS_ANOMALY']].dropna().reset_index(drop=True)
+
+        X = df_model[roll_feats].values
+        y = df_model['TARGET'].values
+
+        split = int(len(df_model) * 0.8)
+        X_train, X_test = X[:split], X[split:]
+        y_train, y_test = y[:split], y[split:]
+
+        clf = RandomForestClassifier(n_estimators=100, random_state=42)
+        clf.fit(X_train, y_train)
+
+        y_pred = clf.predict(X_test)
+        prec  = precision_score(y_test, y_pred, zero_division=0)
+        rec   = recall_score(y_test, y_pred, zero_division=0)
+        f1    = f1_score(y_test, y_pred, zero_division=0)
+
+        proba_all = clf.predict_proba(X)[:, 1]
+
+        return df_model, proba_all, prec, rec, f1, split
+
+    with st.spinner("Addestramento Random Forest..."):
+        df_model, proba_all, prec, rec, f1, split = train_maintenance_model(pozzo_pm)
+
+    # ── KPI ──────────────────────────────────────────────────────────────────
+    st.markdown("---")
+    n_pred_correct = int(((proba_all[split:] > 0.5).astype(int) == df_model['TARGET'].values[split:]).sum())
+    k1, k2, k3, k4 = st.columns(4)
+    k1.metric("Precision (test)",  f"{prec:.2f}")
+    k2.metric("Recall (test)",     f"{rec:.2f}")
+    k3.metric("F1-score (test)",   f"{f1:.2f}")
+    k4.metric("Giorni predetti correttamente (test)", f"{n_pred_correct}")
+
+    # ── Timeline probabilità anomalia ────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("#### 📈 Probabilità anomalia giorno per giorno")
+
+    dates    = df_model['DATEPRD']
+    is_anom  = df_model['IS_ANOMALY'].values
+    high_risk = proba_all > 0.5
+
+    fig_pm = go.Figure()
+
+    # Area probabilità
+    fig_pm.add_trace(go.Scatter(
+        x=dates, y=proba_all,
+        mode='lines', line=dict(color='#3498db', width=1.5),
+        name='P(anomalia prossimi 7gg)', fill='tozeroy',
+        fillcolor='rgba(52,152,219,0.15)'
+    ))
+
+    # Giorni ad alto rischio in rosso
+    fig_pm.add_trace(go.Scatter(
+        x=dates[high_risk], y=proba_all[high_risk],
+        mode='markers', marker=dict(color='#e74c3c', size=5, opacity=0.7),
+        name='P > 0.5 (alto rischio)'
+    ))
+
+    # Soglia 0.5
+    fig_pm.add_hline(y=0.5, line_dash='dash', line_color='red',
+                     annotation_text='Soglia 0.5', annotation_position='bottom right')
+
+    # Anomalie reali IF come markers rossi
+    anom_mask = is_anom == 1
+    if anom_mask.any():
+        fig_pm.add_trace(go.Scatter(
+            x=dates[anom_mask], y=np.ones(anom_mask.sum()) * 1.02,
+            mode='markers', marker=dict(color='#c0392b', size=8, symbol='x'),
+            name='Anomalia reale (IF)', yaxis='y'
+        ))
+
+    # Linea train/test split
+    if split < len(dates):
+        fig_pm.add_vline(
+            x=dates.iloc[split].timestamp() * 1000,
+            line_dash='dash', line_color='gray',
+            annotation_text='Train | Test'
+        )
+
+    fig_pm.update_layout(
+        title=f'Probabilità anomalia futura — {POZZI_LABEL[pozzo_pm]}',
+        xaxis_title='Data',
+        yaxis=dict(title='Probabilità', range=[0, 1.1]),
+        height=460, hovermode='x unified',
+        legend=dict(orientation='h', yanchor='bottom', y=1.02)
+    )
+    st.plotly_chart(fig_pm, use_container_width=True)
