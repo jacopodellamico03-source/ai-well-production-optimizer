@@ -598,6 +598,12 @@ elif sezione == "⚙️ Well Optimizer":
                          'Δ vs Baseline':f"${r_s-ricavo_base:+,.0f}"})
         df_sc = pd.DataFrame(rows)
         st.dataframe(df_sc, use_container_width=True, hide_index=True)
+        st.download_button(
+            label="📥 Scarica risultati ottimizzazione (CSV)",
+            data=df_sc.to_csv(index=False),
+            file_name=f"ottimizzazione_{POZZI_LABEL[pozzo_opt]}_{choke_ott:.0f}pct.csv",
+            mime="text/csv",
+        )
 
         fb = go.Figure(go.Bar(
             x=df_sc['Scenario'], y=df_sc['Olio (Sm³/g)'],
