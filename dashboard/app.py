@@ -40,7 +40,7 @@ st.sidebar.title("🛢️ Well Production Optimizer")
 st.sidebar.markdown("**Campo Volve — Mare del Nord**")
 st.sidebar.markdown("---")
 sezione = st.sidebar.radio("Navigazione",
-    ["🏠 Home", "📈 Production Forecast", "🚨 Anomaly Monitor", "⚙️ Well Optimizer", "🔮 What-if Analysis", "🔧 Predictive Maintenance"])
+    ["🏠 Home", "📈 Production Forecast", "🚨 Anomaly Monitor", "⚙️ Well Optimizer", "🔮 What-if Analysis", "🔧 Predictive Maintenance", "ℹ️ About"])
 st.sidebar.markdown("---")
 st.sidebar.caption("Dataset: Equinor Volve Field (2007–2016)")
 if df_brent is not None:
@@ -988,3 +988,77 @@ elif sezione == "🔧 Predictive Maintenance":
         legend=dict(orientation='h', yanchor='bottom', y=1.02)
     )
     st.plotly_chart(fig_pm, use_container_width=True)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# ABOUT
+# ═══════════════════════════════════════════════════════════════════════════════
+elif sezione == "ℹ️ About":
+    st.title("ℹ️ About — Well Production Optimizer")
+    st.markdown("---")
+
+    # ── 1. Descrizione del progetto ──────────────────────────────────────────
+    st.markdown("### 📌 Descrizione del progetto")
+    st.markdown("""
+Questo tool è un **dashboard analitico AI-powered** per l'ottimizzazione della
+produzione di pozzi petroliferi offshore, sviluppato come progetto di data science
+applicata al settore Oil & Gas.
+
+Combina tecniche di **machine learning** (XGBoost, Isolation Forest, Random Forest,
+Gradient Boosting), **ottimizzazione bayesiana** (Optuna) e **decline curve analysis**
+(Arps) per supportare decisioni operative su tre pozzi del Campo Volve.
+
+**Dataset**: Equinor Volve Field — Mare del Nord (Norvegia), dati operativi
+2007–2016 rilasciati come open dataset da Equinor nel 2018. Il campo ha prodotto
+circa 187 Mboe prima della chiusura nel 2016.
+    """)
+    st.markdown("---")
+
+    # ── 2. Moduli e tecnologie ────────────────────────────────────────────────
+    st.markdown("### 🧩 Moduli e tecnologie")
+    st.markdown("""
+| Modulo | Descrizione | Tecnologie |
+|--------|-------------|------------|
+| 📈 Production Forecast | Previsione produzione con decline curves e ML | Arps (Exp/Iper), XGBoost, Scipy curve_fit |
+| 🚨 Anomaly Monitor | Rilevamento anomalie operative giornaliere | Isolation Forest, MinMaxScaler |
+| ⚙️ Well Optimizer | Ottimizzazione apertura choke con prezzi Brent reali | GradientBoosting, Optuna (Bayesian Opt.) |
+| 🔮 What-if Analysis | Simulazione impatto cambio choke sulla produzione futura | Arps Esponenziale, Decline Curves |
+| 🔧 Predictive Maintenance | Previsione probabilità anomalia nei prossimi 7 giorni | Random Forest, Rolling Features, IF labels |
+| 💹 Economic Analysis | Ricavo lordo, profitto netto, sensitivity al prezzo Brent | EIA/FRED Brent prices, OPEX modelling |
+    """)
+    st.markdown("---")
+
+    # ── 3. Glossario Oil & Gas ────────────────────────────────────────────────
+    st.markdown("### 📖 Glossario Oil & Gas")
+    glossario = {
+        "Sm³/g": "Standard cubic meters per day — unità di misura della portata di produzione giornaliera di olio o gas in condizioni standard di pressione e temperatura.",
+        "GOR": "Gas-Oil Ratio — rapporto tra il volume di gas e il volume di olio prodotti contemporaneamente (Sm³/Sm³). Un GOR crescente può indicare fratturazione del reservoir o gas coning.",
+        "Watercut": "Frazione di acqua nella produzione totale di fluidi (olio + acqua). Espresso come valore tra 0 e 1 o in percentuale. Un watercut alto riduce l'efficienza produttiva.",
+        "Choke": "Valvola di controllo del flusso installata in testa pozzo. L'apertura del choke (%) regola la portata di produzione e influenza la pressione del reservoir.",
+        "EUR": "Estimated Ultimate Recovery — stima del volume totale di idrocarburi recuperabili da un pozzo o campo nell'intera vita produttiva.",
+        "OPEX": "Operating Expenditure — costi operativi giornalieri per mantenere il pozzo in produzione (manutenzione, personale, energia, ecc.). Tipicamente $15–35/boe per campi offshore North Sea.",
+        "Brent": "Benchmark internazionale per il prezzo del petrolio greggio, estratto dal Mare del Nord. Usato come riferimento per la valorizzazione della produzione Volve.",
+    }
+    for termine, definizione in glossario.items():
+        st.markdown(f"**{termine}** — {definizione}")
+    st.markdown("---")
+
+    # ── 4. Limitazioni del modello ────────────────────────────────────────────
+    st.markdown("### ⚠️ Limitazioni del modello")
+    st.warning("""
+- **Dati storici 2007–2016**: tutti i modelli sono calibrati su questo periodo; le previsioni non considerano variazioni geologiche o operative successive.
+- **Well Optimizer**: il simulatore GBR usa una curva empirica choke-produzione, non un modello fisico del reservoir. Le stime di produzione sono indicative.
+- **Predictive Maintenance**: addestrato su soli 3 pozzi con dati limitati — il modello tende a overfittare sul training set e ha valore esplorativo.
+- **Prezzi Brent**: vengono utilizzati prezzi storici EIA (2007–2016). Non sono previsioni future del prezzo del petrolio.
+- **OPEX**: il valore di default ($20,000/g) è una stima basata su benchmark NPD per campi simili. Sostituire con dati reali di campo quando disponibili.
+    """)
+    st.markdown("---")
+
+    # ── 5. Credits ────────────────────────────────────────────────────────────
+    st.markdown("### 🙏 Credits")
+    st.markdown("""
+| Fonte | Dettaglio |
+|-------|-----------|
+| **Dataset produzione** | Equinor Volve Open Dataset (2018) — [equinor.com/energy/volve-data-sharing](https://www.equinor.com/energy/volve-data-sharing) |
+| **Prezzi Brent** | EIA / FRED Federal Reserve Bank of St. Louis — serie storica Brent Crude Oil Prices |
+| **Autore** | Jacopo Dell'Amico |
+    """)
