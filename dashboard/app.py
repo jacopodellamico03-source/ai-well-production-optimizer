@@ -817,29 +817,52 @@ elif sezione == "🔧 Predictive Maintenance":
         X_train, X_test = X[:split], X[split:]
         y_train, y_test = y[:split], y[split:]
 
-        clf = RandomForestClassifier(n_estimators=100, random_state=42)
+        clf = RandomForestClassifier(n_estimators=100, random_state=42, class_weight='balanced')
         clf.fit(X_train, y_train)
 
-        y_pred = clf.predict(X_test)
-        prec  = precision_score(y_test, y_pred, zero_division=0)
-        rec   = recall_score(y_test, y_pred, zero_division=0)
-        f1    = f1_score(y_test, y_pred, zero_division=0)
+        THRESHOLD = 0.3
+
+        proba_test  = clf.predict_proba(X_test)[:, 1]
+        y_pred_test = (proba_test >= THRESHOLD).astype(int)
+        prec  = precision_score(y_test, y_pred_test, zero_division=0)
+        rec   = recall_score(y_test, y_pred_test, zero_division=0)
+        f1    = f1_score(y_test, y_pred_test, zero_division=0)
+
+        proba_train  = clf.predict_proba(X_train)[:, 1]
+        y_pred_train = (proba_train >= THRESHOLD).astype(int)
+        prec_tr = precision_score(y_train, y_pred_train, zero_division=0)
+        rec_tr  = recall_score(y_train, y_pred_train, zero_division=0)
+        f1_tr   = f1_score(y_train, y_pred_train, zero_division=0)
 
         proba_all = clf.predict_proba(X)[:, 1]
 
-        return df_model, proba_all, prec, rec, f1, split
+        return df_model, proba_all, prec, rec, f1, prec_tr, rec_tr, f1_tr, split, THRESHOLD
 
     with st.spinner("Addestramento Random Forest..."):
-        df_model, proba_all, prec, rec, f1, split = train_maintenance_model(pozzo_pm)
+        df_model, proba_all, prec, rec, f1, prec_tr, rec_tr, f1_tr, split, THRESHOLD = train_maintenance_model(pozzo_pm)
 
     # ── KPI ──────────────────────────────────────────────────────────────────
     st.markdown("---")
-    n_pred_correct = int(((proba_all[split:] > 0.5).astype(int) == df_model['TARGET'].values[split:]).sum())
+    n_pred_correct = int(((proba_all[split:] >= THRESHOLD).astype(int) == df_model['TARGET'].values[split:]).sum())
+
+    st.markdown(f"##### Test set (soglia {THRESHOLD})")
     k1, k2, k3, k4 = st.columns(4)
     k1.metric("Precision (test)",  f"{prec:.2f}")
     k2.metric("Recall (test)",     f"{rec:.2f}")
     k3.metric("F1-score (test)",   f"{f1:.2f}")
     k4.metric("Giorni predetti correttamente (test)", f"{n_pred_correct}")
+
+    st.markdown(f"##### Training set (soglia {THRESHOLD})")
+    t1, t2, t3 = st.columns(3)
+    t1.metric("Precision (train)", f"{prec_tr:.2f}")
+    t2.metric("Recall (train)",    f"{rec_tr:.2f}")
+    t3.metric("F1-score (train)",  f"{f1_tr:.2f}")
+
+    st.info(
+        "Il modello identifica pattern precursori nelle ultime 7 giorni prima di un'anomalia. "
+        "Con dati limitati (3 pozzi) tende a overfittare sul training set. "
+        "Le probabilità mostrate nel grafico hanno valore esplorativo."
+    )
 
     # ── Timeline probabilità anomalia ────────────────────────────────────────
     st.markdown("---")
@@ -847,7 +870,7 @@ elif sezione == "🔧 Predictive Maintenance":
 
     dates    = df_model['DATEPRD']
     is_anom  = df_model['IS_ANOMALY'].values
-    high_risk = proba_all > 0.5
+    high_risk = proba_all >= THRESHOLD
 
     fig_pm = go.Figure()
 
@@ -863,12 +886,12 @@ elif sezione == "🔧 Predictive Maintenance":
     fig_pm.add_trace(go.Scatter(
         x=dates[high_risk], y=proba_all[high_risk],
         mode='markers', marker=dict(color='#e74c3c', size=5, opacity=0.7),
-        name='P > 0.5 (alto rischio)'
+        name=f'P ≥ {THRESHOLD} (alto rischio)'
     ))
 
-    # Soglia 0.5
-    fig_pm.add_hline(y=0.5, line_dash='dash', line_color='red',
-                     annotation_text='Soglia 0.5', annotation_position='bottom right')
+    # Soglia
+    fig_pm.add_hline(y=THRESHOLD, line_dash='dash', line_color='red',
+                     annotation_text=f'Soglia {THRESHOLD}', annotation_position='bottom right')
 
     # Anomalie reali IF come markers rossi
     anom_mask = is_anom == 1
