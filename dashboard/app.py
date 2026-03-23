@@ -282,6 +282,34 @@ elif sezione == "📈 Production Forecast":
                 )
                 st.plotly_chart(fig_fi, use_container_width=True)
 
+        if xgb_ok:
+            with st.expander("📉 Residual Analysis XGBoost"):
+                y_te_res = df_ml['BORE_OIL_VOL'].values[split:]
+                y_pr_res = y_xgb[split:]
+                residui  = y_te_res - y_pr_res
+                abs_res  = np.abs(residui)
+                fig_res = go.Figure()
+                fig_res.add_trace(go.Scatter(
+                    x=y_pr_res, y=residui,
+                    mode='markers',
+                    marker=dict(
+                        color=abs_res,
+                        colorscale=[[0, '#2ecc71'], [1, '#e74c3c']],
+                        showscale=True,
+                        colorbar=dict(title='|Residuo|'),
+                        size=6, opacity=0.7,
+                    ),
+                    name='Residui test set',
+                ))
+                fig_res.add_hline(y=0, line_dash='dash', line_color='gray')
+                fig_res.update_layout(
+                    title=f'Residual Plot — XGBoost ({POZZI_LABEL[pozzo]})',
+                    xaxis_title='Valori predetti (Sm³/g)',
+                    yaxis_title='Residui (reale - predetto)',
+                    height=400,
+                )
+                st.plotly_chart(fig_res, use_container_width=True)
+
     # ── EUR — Estimated Ultimate Recovery ────────────────────────────────────
     def calcola_eur(modello: Callable, params: np.ndarray, q_lim: float = 50, dt: int = 1) -> float:
         t, q, eur = 0, modello(0, *params), 0
