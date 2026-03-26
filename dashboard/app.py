@@ -111,36 +111,44 @@ if sezione == "🏠 Home":
     df_stats = calcola_stats_multipozzo(df, df_brent)
     st.dataframe(df_stats, use_container_width=True, hide_index=True)
 
-    # Grafico grouped bar: produzione cumulativa e ricavo stimato
-    fig_mp = go.Figure()
-    fig_mp.add_trace(go.Bar(
-        name='Prod. cumulativa (M Sm³)',
+    # Grafici separati affiancati: produzione cumulativa e ricavo stimato
+    col_prod, col_ricavo = st.columns(2)
+
+    fig_prod = go.Figure()
+    fig_prod.add_trace(go.Bar(
         x=df_stats['Pozzo'],
         y=df_stats['Prod. cumulativa (M Sm³)'],
         marker_color='#3498db',
         text=df_stats['Prod. cumulativa (M Sm³)'].apply(lambda v: f"{v:.3f}"),
         textposition='outside',
-        yaxis='y'
     ))
-    fig_mp.add_trace(go.Bar(
-        name='Ricavo stimato (M USD)',
+    fig_prod.update_layout(
+        title='Produzione cumulativa (M Sm³)',
+        xaxis_title='Pozzo',
+        yaxis_title='M Sm³',
+        height=350,
+        showlegend=False,
+    )
+    with col_prod:
+        st.plotly_chart(fig_prod, use_container_width=True)
+
+    fig_ricavo = go.Figure()
+    fig_ricavo.add_trace(go.Bar(
         x=df_stats['Pozzo'],
         y=df_stats['Ricavo stimato (M USD)'],
         marker_color='#2ecc71',
         text=df_stats['Ricavo stimato (M USD)'].apply(lambda v: f"{v:.1f}"),
         textposition='outside',
-        yaxis='y2'
     ))
-    fig_mp.update_layout(
-        title='Produzione cumulativa e ricavo stimato per pozzo',
-        barmode='group',
+    fig_ricavo.update_layout(
+        title='Ricavo stimato (M USD)',
         xaxis_title='Pozzo',
-        yaxis=dict(title='M Sm³', side='left'),
-        yaxis2=dict(title='M USD', side='right', overlaying='y'),
-        height=400,
-        legend=dict(orientation='h', yanchor='bottom', y=1.02)
+        yaxis_title='M USD',
+        height=350,
+        showlegend=False,
     )
-    st.plotly_chart(fig_mp, use_container_width=True)
+    with col_ricavo:
+        st.plotly_chart(fig_ricavo, use_container_width=True)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # PRODUCTION FORECAST
